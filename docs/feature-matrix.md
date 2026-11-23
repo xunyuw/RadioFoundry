@@ -175,7 +175,7 @@ What the records don't hold yet: limits and known problems from the bring-up pag
 |---|---|---|
 | DM-1701 | Not yet checked: split duplex with a real pair of radios, standalone SFR, roaming to a repeater, IP over DMR end to end, VOX with a voice, privacy scrambling against another radio | [on-air-coverage](testing/on-air-coverage.md) |
 | DM-32UV | GPS data seen, no fix yet. The transmit half of a split duplex pair not checked. FM transmit deviation at 12.5 kHz, both slots through a duplex hotspot. A DMR receive fault after hours of uptime (2026-10-16, cause unknown). USB not available | [dm32-bringup](testing/dm32-bringup.md) |
-| DM-1801 Pro | The receive half of a split duplex pair, VHF transmit, VOX and APRS receive not checked. Chinese is unavailable: the 5x8 words leave no 16 px line for a CJK glyph, so a hand-tuned small-height CJK face and a layout to match are needed, not a switch ([UI spec](spec/ui.md) 2.5) | [hardware-dm1801pro](spec/hardware-dm1801pro.md) |
+| DM-1801 Pro | The receive half of a split duplex pair, VHF transmit, VOX and APRS receive not checked. Chinese is not built in: the 5x8 words leave no line for a CJK glyph at the 16 px cell, and a 12 px cell (`CONFIG_CJK_CELL`, an OFL pixel font) has not been checked on this layout ([UI spec](spec/ui.md) 2.5) | [hardware-dm1801pro](spec/hardware-dm1801pro.md) |
 | DB25-D PRO | The older FD6818 batches (D64, D66, D6T) are driven by the same image, untested on a radio. Split duplex not built. Standalone and MMDVM SFR checked on the SDR bench (experimental). DMR audio from the speaker, a GPS fix and settings kept across power off not confirmed | [hardware-db25d](spec/hardware-db25d.md) |
 | MD-380 | Fully operational (UHF)¹. DCS, the VHF image, tone deviation and data from a DMR VFO not checked. Split duplex and SFR not available (HR_C5000). The Chinese image builds in ci but is untested on a radio | [md380-bringup](testing/md380-bringup.md) |
 
@@ -259,6 +259,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | `LANG_FR` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | `LANG_ZH` | ○ | ○ | ✕ | ✕ | ✕ | ○ | ○ | ✕ |
 | `CJK_GLYPHS` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| `CJK_FONT_IN_FLASH` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | `LANG_DEFAULT_ES` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ✕ |
 | `LANG_DEFAULT_IT` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ✕ |
 | `LANG_DEFAULT_FR` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
