@@ -345,7 +345,7 @@ check-cjk:
 		if [ "$(CONFIG_CJK_FONT_IN_FLASH)" = "y" ]; then \
 			grep -q cjk_font_addr $(CJK_DATA) || { echo "make: $(CJK_DATA) has the glyphs in the image but CONFIG_CJK_FONT_IN_FLASH=y: build it with tools/cjkfont.py --out-bin (docs/dev/translating.md)" >&2; exit 1; }; \
 		else \
-			grep -q cjk_font_addr $(CJK_DATA) 2>/dev/null && { echo "make: $(CJK_DATA) has no glyphs but CONFIG_CJK_FONT_IN_FLASH is off: rebuild it without --out-bin" >&2; exit 1; }; \
+			grep -q cjk_font_addr $(CJK_DATA) 2>/dev/null && { echo "make: $(CJK_DATA) has no glyphs but CONFIG_CJK_FONT_IN_FLASH is off: rebuild it without --out-bin" >&2; exit 1; } || :; \
 		fi; \
 	fi
 check-pinyin:

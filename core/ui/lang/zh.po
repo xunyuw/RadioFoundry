@@ -2117,7 +2117,7 @@ msgstr "已达上限"
 #: core/ui/ui_menus.c
 msgctxt "TEXT_TOAST_PINYIN_FULL"
 msgid "That's the longest reading"
-msgstr "已达最长读音"
+msgstr "已达最长拼读"
 
 #: core/ui/ui_menus.c
 msgctxt "LABEL_NAME"
