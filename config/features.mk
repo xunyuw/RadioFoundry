@@ -190,6 +190,10 @@ CONFIG_LANG_ZH ?= n
 # Chinese (docs/build-config.md) turns it off and keeps the translated menus (it draws boxes for any Chinese). Needs
 # CONFIG_LANG_ZH (the radio's font has no glyph for the characters otherwise)
 CONFIG_CJK_GLYPHS ?= $(CONFIG_LANG_ZH)
+# The CJK glyph cell's height and width in pixels, and what tools/cjkfont.py --cell wrote the table at: 16 is the
+# height of the 8x16 font (a 240 px class layout), 12 matches the 6x12 font a 160 px class layout already draws its
+# words in, so that layout stays as it is in English (docs/dev/translating.md)
+CONFIG_CJK_CELL ?= 16
 # Keep the CJK glyph bitmaps in the data flash instead of the application region: the code point index stays here (a
 # few KB) and each glyph is read from the card at CONFIG_CJK_FONT_ADDR. For a board whose application region can't hold
 # a whole vocabulary (a full GB2312 level 1 face is 88 KB at a 12 px cell). Needs CONFIG_CJK_GLYPHS; the image is loaded

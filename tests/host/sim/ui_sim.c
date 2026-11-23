@@ -1770,7 +1770,7 @@ uint32_t ui_svc_features(void)
 	       ~(nxdn_radio ? 0 : UI_FEAT_NXDN);
 }
 // My radio's names (ui_svc_name_*): placeholders, as the user's own would be; a save writes at once
-static char sim_names[UI_NAME_COUNT][17];
+static char sim_names[UI_NAME_COUNT][CODEPLUG_NAME_LEN + 1];
 static void sim_names_reset(void)
 {
 	strcpy(sim_names[UI_NAME_RADIO], "Q0TEST");
