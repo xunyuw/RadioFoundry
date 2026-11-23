@@ -38,19 +38,24 @@ static int record(uint16_t base, uint16_t count, codeplug_ref_t ref, uint8_t kin
 		return -1;
 	}
 	int len = codeplug_kv_get((uint16_t)(base + ref.index - 1u), buf, (uint16_t)(cap + CODEPLUG_REC_HDR));
-	if (len < (int)CODEPLUG_REC_HDR || buf[0] != kind || codeplug_name_check((const char *)&buf[2]) != ref.check) {
+	// A record written while the name field was 16 octets is 8 octets shorter, and an upgrade still reads it: the
+	// header follows the stored length, and so does the name it copies out
+	bool old = len >= (int)CODEPLUG_REC_HDR_OLD && len < (int)CODEPLUG_REC_HDR;
+	unsigned hdr = old ? CODEPLUG_REC_HDR_OLD : CODEPLUG_REC_HDR;
+	unsigned name_len = old ? 16u : CODEPLUG_NAME_LEN;
+	if (len < (int)hdr || buf[0] != kind || codeplug_name_check((const char *)&buf[2]) != ref.check) {
 		return -1;
 	}
 	h->kind = buf[0];
 	h->flags = buf[1];
 	unsigned n = 0;
-	while (n < CODEPLUG_NAME_LEN && buf[2 + n] != 0u && buf[2 + n] != 0xFFu) {
+	while (n < name_len && buf[2 + n] != 0u && buf[2 + n] != 0xFFu) {
 		h->name[n] = (char)buf[2 + n];
 		n++;
 	}
 	h->name[n] = '\0';
-	int rest = len - (int)CODEPLUG_REC_HDR;
-	memmove(buf, buf + CODEPLUG_REC_HDR, (size_t)(rest < (int)cap ? rest : (int)cap));
+	int rest = len - (int)hdr;
+	memmove(buf, buf + hdr, (size_t)(rest < (int)cap ? rest : (int)cap));
 	return rest;
 }
 
@@ -81,7 +86,12 @@ int codeplug_system(uint8_t n, codeplug_system_t *s, uint8_t *block, uint16_t ca
 		return -1;
 	}
 	int len = codeplug_kv_get((uint16_t)(CODEPLUG_KEY_SYSTEM + n), block, (uint16_t)(cap + CODEPLUG_SYS_HDR));
-	if (len < (int)CODEPLUG_SYS_HDR || block[0] == 0u || block[0] == 0xFFu) {
+	// A system record written while the name field was 16 octets is 8 octets shorter; its fixed fields sit where they
+	// always did, so only the header's length and the name's differ
+	bool old = len >= (int)CODEPLUG_SYS_HDR_OLD && len < (int)CODEPLUG_SYS_HDR;
+	unsigned hdr = old ? CODEPLUG_SYS_HDR_OLD : CODEPLUG_SYS_HDR;
+	unsigned name_len = old ? 16u : CODEPLUG_NAME_LEN;
+	if (len < (int)hdr || block[0] == 0u || block[0] == 0xFFu) {
 		return -1;
 	}
 	s->type = block[0];
@@ -92,13 +102,13 @@ int codeplug_system(uint8_t n, codeplug_system_t *s, uint8_t *block, uint16_t ca
 	s->fb_chan = rec_rd16(&block[8]);
 	s->fb_check = rec_rd16(&block[10]);
 	unsigned i = 0;
-	while (i < CODEPLUG_NAME_LEN && block[12 + i] != 0u && block[12 + i] != 0xFFu) {
+	while (i < name_len && block[12 + i] != 0u && block[12 + i] != 0xFFu) {
 		s->name[i] = (char)block[12 + i];
 		i++;
 	}
 	s->name[i] = '\0';
-	int rest = len - (int)CODEPLUG_SYS_HDR;
-	memmove(block, block + CODEPLUG_SYS_HDR, (size_t)(rest < (int)cap ? rest : (int)cap));
+	int rest = len - (int)hdr;
+	memmove(block, block + hdr, (size_t)(rest < (int)cap ? rest : (int)cap));
 	return rest;
 }
 

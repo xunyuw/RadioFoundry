@@ -8,6 +8,7 @@
 #include "codeplug/zone_edit.h"
 #include "board.h"
 #include "codeplug/codeplug_modes.h"	// CODEPLUG_KIND_NONE: a share leaves channels of a kind out without the modes part
+#include "codeplug/codeplug.h"		// CODEPLUG_ZONE_NAME_LEN: the zone record's field, shorter than a channel's
 #if CONFIG_ZONE_SHARE_MODES
 #include "codeplug/codeplug_kv.h"
 #include "codeplug/codeplug_tag.h"
@@ -317,8 +318,12 @@ static uint8_t find_system(const zsSystem_t *s, uint8_t *buf, uint16_t cap)
 	}
 	codeplug_kv_begin(&c, CODEPLUG_KEY_SYSTEM, CODEPLUG_KEY_SYSTEM + 0xFEu);
 	while ((len = codeplug_kv_next(&c, &key, buf, cap)) >= 0) {
-		if (len >= (int)CODEPLUG_SYS_HDR + s->idLen && buf[0] == s->type && buf[3] == s->idLen &&
-		    memcmp(&buf[CODEPLUG_SYS_HDR], s->block, s->idLen) == 0) {
+		// A record written while the name field was 16 octets puts its block 8 octets earlier, and it is the same
+		// system: compare against the header the stored length implies (codeplug_records.c reads it the same way)
+		unsigned hdr = (len >= (int)CODEPLUG_SYS_HDR || len < (int)CODEPLUG_SYS_HDR_OLD) ? CODEPLUG_SYS_HDR
+											       : CODEPLUG_SYS_HDR_OLD;
+		if (len >= (int)hdr + s->idLen && buf[0] == s->type && buf[3] == s->idLen &&
+		    memcmp(&buf[hdr], s->block, s->idLen) == 0) {
 			return (uint8_t)(key - CODEPLUG_KEY_SYSTEM);
 		}
 	}

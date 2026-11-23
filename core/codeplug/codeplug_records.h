@@ -29,8 +29,11 @@ enum {
 };
 #define CODEPLUG_TARGET_TYPE	0x03u
 
-// A target's or a list's header (5.2, 5.3): kind, flags, name (16 octets); the address or the references follow
+// A target's or a list's header (5.2, 5.3): kind, flags, name; the address or the references follow. The name field
+// was 16 octets before it grew to CODEPLUG_NAME_LEN, and a record written then is still read: its header is 8 octets
+// shorter, which is what CODEPLUG_REC_HDR_OLD names (codeplug_records.c picks by the record's stored length)
 #define CODEPLUG_REC_HDR	(2u + CODEPLUG_NAME_LEN)
+#define CODEPLUG_REC_HDR_OLD	(2u + 16u)
 typedef struct {
 	uint8_t kind;
 	uint8_t flags;
@@ -45,6 +48,9 @@ typedef struct {
 // CODEPLUG_SYS_NAME (12), after those fixed fields
 #define CODEPLUG_SYS_NAME	12u
 #define CODEPLUG_SYS_HDR	(CODEPLUG_SYS_NAME + CODEPLUG_NAME_LEN)
+// A system record written while the name field was 16 octets: 8 octets shorter, same fields, so a reader picks the
+// header by the record's stored length (codeplug_records.c)
+#define CODEPLUG_SYS_HDR_OLD	(CODEPLUG_SYS_NAME + 16u)
 #define CODEPLUG_SYSTEMS_RUN	8u	// system numbers a radio runs, 0-7 (a stun names one in 3 bits): an import adds
 					// none past them
 #define CODEPLUG_SYS_NEEDS_KEY	0x01u	// flags: the system can't be used without its secret

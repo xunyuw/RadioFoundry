@@ -443,7 +443,7 @@ static void test_refused(void)
 	CHECK(!radio_t3_load(0, &s) && !radio_t3_usable(0) && radio_t3_name(0, name));
 	CHECK(codeplug_kv_set(SYS(0), v, BLOCK + BLOCK_MIN + 2));
 	CHECK(radio_t3_load(0, &s) && s.cfg.auth.nsites == 1 && s.cfg.sites[0] == 1);
-	CHECK(codeplug_kv_set(SYS(0), v, BLOCK - 1));		// no whole header: no system
+	CHECK(codeplug_kv_set(SYS(0), v, CODEPLUG_SYS_HDR_OLD - 1));	// no whole header, old or new: no system
 	CHECK(!radio_t3_load(0, &s) && !radio_t3_name(0, name));
 	memset(v + SYS_LEN, 0xA5, 8);			// a later writer's appended fields
 	CHECK(codeplug_kv_set(SYS(0), v, sizeof v));

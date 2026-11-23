@@ -406,6 +406,18 @@ static void put_rec(uint16_t key, uint8_t kind, uint8_t flags, const char *name,
 	CHECK(codeplug_kv_set(key, v, (uint16_t)(CODEPLUG_REC_HDR + len)));
 }
 
+// The same record as a build wrote it while the name field was 16 octets: 8 octets shorter, the rest 8 octets earlier
+static void put_rec_old(uint16_t key, uint8_t kind, uint8_t flags, const char *name, const uint8_t *rest, uint16_t len)
+{
+	uint8_t v[CODEPLUG_REC_HDR_OLD + 64];
+	v[0] = kind;
+	v[1] = flags;
+	memset(&v[2], 0xFF, 16);
+	memcpy(&v[2], name, strlen(name));
+	memcpy(&v[CODEPLUG_REC_HDR_OLD], rest, len);
+	CHECK(codeplug_kv_set(key, v, (uint16_t)(CODEPLUG_REC_HDR_OLD + len)));
+}
+
 static void test_records(void)
 {
 	fresh();
@@ -432,6 +444,12 @@ static void test_records(void)
 	CHECK(codeplug_target(r1, TEST_KIND, &h, addr, 3) == 5 && addr[2] == 0x03 && h.flags == 0x41u);
 	CHECK(codeplug_target(r2, TEST_KIND, &h, addr, 16) == -1);		// another kind's
 	CHECK(codeplug_target((codeplug_ref_t){ 0, 0 }, TEST_KIND, &h, addr, 16) == -1);
+	// A record an older build wrote, with a 16-octet name field: the upgrade reads it whole
+	put_rec_old(CODEPLUG_KEY_TARGET + 5, TEST_KIND, CODEPLUG_TARGET_ALL, "Old target", call, sizeof call);
+	codeplug_ref_t r5 = { 6, codeplug_name_check("Old target") };
+	CHECK(codeplug_target(r5, TEST_KIND, &h, addr, 16) == 6 && memcmp(addr, call, 6) == 0);
+	CHECK(strcmp(h.name, "Old target") == 0);
+
 	// Replaced under the reference: a new name doesn't resolve
 	put_rec(CODEPLUG_KEY_TARGET + 0, TEST_KIND, CODEPLUG_TARGET_ALL, "Someone else", call, sizeof call);
 	CHECK(codeplug_target(r0, TEST_KIND, &h, addr, 16) == -1);
