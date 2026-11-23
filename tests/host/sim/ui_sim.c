@@ -3656,7 +3656,7 @@ static bool run_token(char *t, char *err, size_t len)
 			ui_draw_splash(board.name, "a1b2c3d4", tr(STUB_ENTRY_LINE1), tr(STUB_ENTRY_LINE2));
 			return true;
 		}
-		char l1[17], l2[17];
+		char l1[CODEPLUG_NAME_LEN + 1], l2[CODEPLUG_NAME_LEN + 1];
 		ui_svc_boot_text(l1, l2);
 		ui_draw_splash(board.name, "a1b2c3d4", l1, l2);
 		return true;
