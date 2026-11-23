@@ -91,20 +91,21 @@ def write_c(path, syllables, entries, notice, in_flash=False):
         f.write("#if CONFIG_PINYIN\n")
         f.write("const uint16_t pinyin_syllable_count = %d;\n\n" % len(syllables))
         f.write("const uint16_t pinyin_entry_count = %d;\n\n" % len(entries))
-        if in_flash:
-            # The tables are in the data flash at CONFIG_PINYIN_ADDR; --out-bin wrote them there
-            f.write("// The tables live in the data flash (CONFIG_PINYIN_ADDR)\n")
-            f.write("const uint32_t pinyin_addr = CONFIG_PINYIN_ADDR;\n")
-        else:
-            f.write("const char pinyin_syllable[][PINYIN_SYLLABLE_BYTES] = {\n")
-            for s in syllables:
-                f.write('\t"%s",\n' % s)
-            f.write("};\n\n")
-            f.write("// Sorted by reading, then by code point: a prefix search becomes one walk\n")
-            f.write("const pinyin_entry_t pinyin_entry[] = {\n")
-            for cp, si in entries:
-                f.write("\t{ 0x%04X, %d },\t/* %s */\n" % (cp, si, c_bytes(chr(cp))))
-            f.write("};\n\n")
+        # Both shapes in one file, chosen by CONFIG_PINYIN_IN_FLASH: a tree never holds a table only one build can use
+        f.write("#if CONFIG_PINYIN_IN_FLASH\n")
+        f.write("// The tables are in the data flash at CONFIG_PINYIN_ADDR\n")
+        f.write("const uint32_t pinyin_addr = CONFIG_PINYIN_ADDR;\n")
+        f.write("#else\n")
+        f.write("const char pinyin_syllable[][PINYIN_SYLLABLE_BYTES] = {\n")
+        for s in syllables:
+            f.write('\t"%s",\n' % s)
+        f.write("};\n\n")
+        f.write("// Sorted by reading, then by code point: a prefix search becomes one walk\n")
+        f.write("const pinyin_entry_t pinyin_entry[] = {\n")
+        for cp, si in entries:
+            f.write("\t{ 0x%04X, %d },\t/* %s */\n" % (cp, si, c_bytes(chr(cp))))
+        f.write("};\n")
+        f.write("#endif\n")
         f.write("#endif\n")
 
 

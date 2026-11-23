@@ -33,13 +33,13 @@ BOARD_UNSUPPORTED += FAULT_TRACE	# needs a host UART: the host port is USB, and 
 # GPS stays on: no module from the factory, but owners fit one on PA10 / PA9 (hardware-dm1701.md 14.2). Detected at run
 # time in the background: a radio without one stops listening after 5 s of silence
 
-# Chinese (CONFIG_LANG_ZH, docs/build-config.md): a line of it needs 16 px, and this class draws its words in the 6x12
-# font, so core/ui/ui_screens.c moves lists, labels, the strip, the hints and the text pages up to the 8x16 font while a
-# wide language is in use; Home then has no room for the zone line and a list shows 5 rows instead of 7 on the 160x120
-# panel (docs/spec/ui.md 2.5). Off by default like on every radio. Its glyph table (about 27 KB, docs/feature-matrix.md)
-# is far smaller than the old GB2312 one: the `chinese` CI extra builds it beside the default build
+# Chinese (CONFIG_LANG_ZH, docs/build-config.md): a 12 px cell is the size of the 6x12 font this class already draws
+# its words in, so the layout stays as it is in English and no row is lost. Its table is the catalogs' own characters,
+# not every GB2312 character: the 720 KB region has no room for those, so a Chinese name that uses a rarer one draws a
+# box here (docs/dev/translating.md says why). Off by default like on every radio
 #
-#	make BOARD=dm1701 CONFIG_LANG_ZH=y CONFIG_LANG_DEFAULT_ZH=y
+#	make BOARD=dm1701 CONFIG_LANG_ZH=y CONFIG_LANG_DEFAULT_ZH=y CONFIG_CJK_CELL=12
 #
 # board.toml's "chinese" ci extra builds exactly that. The web flasher offers Chinese to a browser that asks for it
 # (docs/user/02-installing.md); the build fits without dropping Spanish (docs/user/23-radios.md)
+CONFIG_CJK_CELL ?= 12

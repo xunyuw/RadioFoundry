@@ -27,11 +27,9 @@ typedef struct {
 	uint16_t syllable;
 } pinyin_entry_t;
 
-// Every reading a candidate character of the GB2312 set has (core/ui/pinyin_data.c). The table is a flat array of
-// fixed fields rather than [count][bytes], so the generated file does not need the count as a macro.
-// With CONFIG_PINYIN_IN_FLASH both tables are in the data flash instead, read at CONFIG_PINYIN_ADDR
+// The generated table (core/ui/pinyin_data.c) carries both shapes and CONFIG_PINYIN_IN_FLASH picks one: the tables in
+// this image, or their address in the data flash
 #if CONFIG_PINYIN_IN_FLASH
-#define PINYIN_IN_FLASH	1
 extern const uint32_t pinyin_addr;
 #else
 extern const char pinyin_syllable[][PINYIN_SYLLABLE_BYTES];

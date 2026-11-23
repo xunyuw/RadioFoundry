@@ -12,6 +12,10 @@ const uint16_t pinyin_syllable_count = 400;
 
 const uint16_t pinyin_entry_count = 6763;
 
+#if CONFIG_PINYIN_IN_FLASH
+// The tables are in the data flash at CONFIG_PINYIN_ADDR
+const uint32_t pinyin_addr = CONFIG_PINYIN_ADDR;
+#else
 const char pinyin_syllable[][PINYIN_SYLLABLE_BYTES] = {
 	"a",
 	"ai",
@@ -7181,5 +7185,5 @@ const pinyin_entry_t pinyin_entry[] = {
 	{ 0x80D9, 399 },	/* \xE8\x83\x99 */
 	{ 0x963C, 399 },	/* \xE9\x98\xBC */
 };
-
+#endif
 #endif

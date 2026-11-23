@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <string.h>
 #include "pinyin.h"
-#ifdef PINYIN_IN_FLASH
+#if CONFIG_PINYIN_IN_FLASH
 #include "board.h"
 #include "storage/storage.h"
 #endif
@@ -20,7 +20,7 @@
 extern const uint16_t pinyin_syllable_count;
 extern const uint16_t pinyin_entry_count;
 
-#ifdef PINYIN_IN_FLASH
+#if CONFIG_PINYIN_IN_FLASH
 // One reading, or one entry, read from the data flash
 static bool pinyin_read(uint32_t addr, void *buf, uint32_t len)
 {

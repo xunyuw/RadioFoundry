@@ -215,6 +215,11 @@ def main():
     ap.add_argument("--po", help="take the characters from a gettext catalog's msgstr lines")
     ap.add_argument("--text", help="take the characters from this text instead")
     ap.add_argument("--chars-file", help="also take the characters from a UTF-8 name list (# comments ignored)")
+    ap.add_argument("--flash-po",
+                    help="with a table built for the data flash: the catalog whose characters the shape for a build "
+                         "that keeps its glyphs in the image covers (the 720 KB a radio has cannot hold every GB2312 "
+                         "character; the flash shape has room for them)")
+
     ap.add_argument("--gb2312-level1", action="store_true",
                     help="also take the 3755 level 1 (common) ideographs of GB2312")
     ap.add_argument("--gb2312", action="store_true",
@@ -263,6 +268,27 @@ def main():
     if not glyphs:
         ap.error("every character came out blank")
 
+    # The face a build that keeps its glyphs in the image gets: the catalog's characters and the name list, which is
+    # all such a board has room for. --flash-po names them when the table the file's first shape covers is wider (a
+    # board that reads its glyphs from the data flash can afford every GB2312 character; one that carries them in its
+    # 720 KB image cannot). Without it the two shapes cover the same characters.
+    flash_chars = None
+    if args.flash_po:
+        flash_chars = chars_from_po(args.flash_po)
+        if args.chars_file:
+            flash_chars |= chars_from_file(args.chars_file)
+        flash_chars = sorted(ch for ch in flash_chars if codepoint_ok(ord(ch)) and not ch.isspace())
+
+    flash_glyphs = []
+    if flash_chars is not None:
+        for ch in flash_chars:
+            rows = to_rows(rasterize(font, ch, window, args.threshold))
+            if not any(any(row) for row in rows):
+                continue
+            flash_glyphs.append((ord(ch), ch, rows))
+        if not flash_glyphs:
+            ap.error("--flash-po's characters all came out blank")
+
     if args.out_png:
         write_preview([rows for _, _, rows in glyphs], args.out_png)
 
@@ -303,22 +329,32 @@ def main():
         f.write("\n")
         f.write('#include "cjk_font.h"\n\n')
         f.write("#if CONFIG_LANG_ZH\n")
+        # Two shapes in one file, chosen by CONFIG_CJK_FONT_IN_FLASH. A build that carries the glyphs in its image has
+        # room for the catalog's own characters; one that reads them from the data flash can cover every GB2312
+        # character. Each shape brings its own code point table, because the count differs.
+        f.write("#if CONFIG_CJK_FONT_IN_FLASH\n")
+        f.write("// The glyphs are in the data flash at CONFIG_CJK_FONT_ADDR, in the order of the code points above\n")
         f.write("const uint16_t cjk_font_cp[] = {\n")
         for i, (cp, _, _) in enumerate(glyphs):
             f.write("\t0x%04X,%s" % (cp, "\n" if i % 8 == 7 or i == len(glyphs) - 1 else " "))
         f.write("};\n\n")
-        if not args.out_bin:
-            # The glyphs live in this image: the lookup indexes cjk_font_bits directly
-            f.write("const uint8_t cjk_font_bits[] = {\n")
-            for cp, ch, rows in glyphs:
-                f.write("\t/* U+%04X \"%s\" */\n" % (cp, c_bytes(ch)))
-                for row in rows:
-                    f.write("\t" + ", ".join("0x%02X" % b for b in row) + ",\n")
-            f.write("};\n\n")
-        f.write("const uint16_t cjk_font_count = %d;\n" % len(glyphs))
-        if args.out_bin:
-            # The glyphs are in the data flash at CONFIG_CJK_FONT_ADDR, in the same order as the code points above
-            f.write("const uint32_t cjk_font_addr = CONFIG_CJK_FONT_ADDR;\n")
+        f.write("const uint16_t cjk_font_count = %d;\n\n" % len(glyphs))
+        f.write("const uint32_t cjk_font_addr = CONFIG_CJK_FONT_ADDR;\n")
+        f.write("#else\n")
+        flash = flash_glyphs if flash_glyphs else glyphs
+        f.write("// The glyphs are in this image: the characters the catalogs and the names list use\n")
+        f.write("const uint16_t cjk_font_cp[] = {\n")
+        for i, (cp, _, _) in enumerate(flash):
+            f.write("\t0x%04X,%s" % (cp, "\n" if i % 8 == 7 or i == len(flash) - 1 else " "))
+        f.write("};\n\n")
+        f.write("const uint16_t cjk_font_count = %d;\n\n" % len(flash))
+        f.write("const uint8_t cjk_font_bits[] = {\n")
+        for cp, ch, rows in flash:
+            f.write("\t/* U+%04X \"%s\" */\n" % (cp, c_bytes(ch)))
+            for row in rows:
+                f.write("\t" + ", ".join("0x%02X" % b for b in row) + ",\n")
+        f.write("};\n")
+        f.write("#endif\n")
         f.write("#endif\n")
 
     print("cjkfont: %d glyphs of %dx%d, %d bytes of bitmap, %d bytes of code points"
