@@ -203,6 +203,12 @@
 #ifndef CONFIG_CJK_CELL
 #define CONFIG_CJK_CELL			16
 #endif
+// Where the CJK glyphs live: 0 keeps them in this image (cjk_font_data.c, a few hundred of the interface's own
+// characters), 1 leaves the code point index here and reads each glyph from the data flash (tools/cjkfont.py
+// --out-bin), so a whole GB2312 vocabulary fits a radio whose application region can't hold it
+#ifndef CONFIG_CJK_FONT_IN_FLASH
+#define CONFIG_CJK_FONT_IN_FLASH	0
+#endif
 #define CONFIG_LANG_ANY			(CONFIG_LANG_ES || CONFIG_LANG_IT || CONFIG_LANG_FR || CONFIG_LANG_ZH)
 // The language the radio starts in until the user picks one (CONFIG_LANG_DEFAULT_<CODE>, needs its CONFIG_LANG_<CODE>):
 // all 0 = English

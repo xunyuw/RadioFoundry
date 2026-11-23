@@ -207,13 +207,19 @@ def main():
     ap.add_argument("--license", required=True, help="the font's license text, carried in the generated file")
     ap.add_argument("--spdx", required=True, help="the font data's SPDX license identifier (e.g. OFL-1.1)")
     ap.add_argument("--out-c", required=True, help="the C file to write")
+    ap.add_argument("--out-bin",
+                    help="write the glyph bitmaps to this binary too, for a font flash holds (a board whose data "
+                         "flash keeps the face): the C file then carries the code point index only, and the lookup "
+                         "reads a glyph from that address (core/ui/cjk_font.c)")
+    ap.add_argument("--out-addr", default="0",
+                    help="the flash address --out-bin is burned at, as the table reports it")
     ap.add_argument("--out-png", help="a preview image to write")
     args = ap.parse_args()
     set_cell(args.cell)
 
-    if not args.po and not args.text:
-        ap.error("give --po or --text")
-    chars = chars_from_po(args.po) if args.po else set(args.text)
+    if not args.po and not args.text and not args.chars_file and not args.gb2312_level1:
+        ap.error("give --po, --text, --chars-file or --gb2312-level1")
+    chars = chars_from_po(args.po) if args.po else (set(args.text) if args.text else set())
     if args.chars_file:
         chars |= chars_from_file(args.chars_file)
     if args.gb2312_level1:
@@ -239,6 +245,15 @@ def main():
 
     if args.out_png:
         write_preview([rows for _, _, rows in glyphs], args.out_png)
+
+    if args.out_bin:
+        # One glyph after the other in code point order, CELL rows of ROW_BYTES each: the lookup multiplies the
+        # index of the code point in cjk_font_cp by GLYPH_BYTES and reads from cjk_font_addr + that
+        with open(args.out_bin, "wb") as fb:
+            for _, _, rows in glyphs:
+                for row in rows:
+                    fb.write(row)
+        print("cjkfont: %s holds %d glyphs, %d bytes" % (args.out_bin, len(glyphs), len(glyphs) * GLYPH_BYTES))
 
     name = args.font_name or os.path.basename(args.font)
     with open(args.font, "rb") as f:
@@ -269,13 +284,18 @@ def main():
         for i, (cp, _, _) in enumerate(glyphs):
             f.write("\t0x%04X,%s" % (cp, "\n" if i % 8 == 7 or i == len(glyphs) - 1 else " "))
         f.write("};\n\n")
-        f.write("const uint8_t cjk_font_bits[] = {\n")
-        for cp, ch, rows in glyphs:
-            f.write("\t/* U+%04X \"%s\" */\n" % (cp, c_bytes(ch)))
-            for row in rows:
-                f.write("\t" + ", ".join("0x%02X" % b for b in row) + ",\n")
-        f.write("};\n\n")
+        if not args.out_bin:
+            # The glyphs live in this image: the lookup indexes cjk_font_bits directly
+            f.write("const uint8_t cjk_font_bits[] = {\n")
+            for cp, ch, rows in glyphs:
+                f.write("\t/* U+%04X \"%s\" */\n" % (cp, c_bytes(ch)))
+                for row in rows:
+                    f.write("\t" + ", ".join("0x%02X" % b for b in row) + ",\n")
+            f.write("};\n\n")
         f.write("const uint16_t cjk_font_count = %d;\n" % len(glyphs))
+        if args.out_bin:
+            # The glyphs are in the data flash at CONFIG_CJK_FONT_ADDR, in the same order as the code points above
+            f.write("const uint32_t cjk_font_addr = CONFIG_CJK_FONT_ADDR;\n")
         f.write("#endif\n")
 
     print("cjkfont: %d glyphs of %dx%d, %d bytes of bitmap, %d bytes of code points"

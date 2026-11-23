@@ -23,9 +23,15 @@
 #if CONFIG_CJK_GLYPHS && (CONFIG_CJK_CELL < 8 || CONFIG_CJK_CELL > 32)
 #error "CONFIG_CJK_CELL must be 8..32"
 #endif
+// The glyphs are read from the data flash (CONFIG_CJK_FONT_IN_FLASH): the lookup fills one cell instead of returning a
+// pointer into this image, so the two builds differ only in where the bitmap is
+#if CONFIG_CJK_FONT_IN_FLASH
+#define CJK_FONT_IN_FLASH	1
+#endif
 
 // The glyph of a code point: CJK_FONT_H rows of CJK_FONT_ROW_BYTES bytes, MSB the left of the cell, or NULL when the
-// font has none (the text layer draws a box). Built only with CONFIG_CJK_GLYPHS; without it the call returns NULL
+// font has none (the text layer draws a box). Built only with CONFIG_CJK_GLYPHS; without it the call returns NULL.
+// The pointer is valid until the next call when the glyphs come from the data flash
 const uint8_t *cjk_font_glyph(uint32_t cp);
 
 #endif
