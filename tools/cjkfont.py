@@ -45,6 +45,18 @@ BITS_PER_ROW = CELL
 ROW_BYTES = (BITS_PER_ROW + 7) // 8
 GLYPH_BYTES = CELL * ROW_BYTES
 
+
+def set_cell(size):
+    """Set the cell size for this run. The firmware's cjk_font.h carries the same numbers, and they must agree: the
+    text layer draws CJK_FONT_H rows of CJK_FONT_ROW_BYTES bytes for every character above U+00FF."""
+    global CELL, BITS_PER_ROW, ROW_BYTES, GLYPH_BYTES
+    if size < 8 or size > 32:
+        raise SystemExit("cjkfont: --cell %d is outside 8..32" % size)
+    CELL = size
+    BITS_PER_ROW = CELL
+    ROW_BYTES = (BITS_PER_ROW + 7) // 8
+    GLYPH_BYTES = CELL * ROW_BYTES
+
 # A full-width ideograph: a CJK font's layout box for it is its em square, which is the cell every glyph is drawn in
 EM_REF = "\u56fd"			# 国
 
@@ -176,9 +188,14 @@ def license_lines(path):
 def main():
     ap = argparse.ArgumentParser(description="Build the firmware's CJK glyph table (docs/dev/translating.md)")
     ap.add_argument("--font", required=True, help="an outline font whose license allows embedding bitmaps")
+    ap.add_argument("--cell", type=int, default=16,
+                    help="the glyph cell in pixels: 16 for the 8x16 Latin line, 12 where a layout draws its words in "
+                         "the 6x12 font (core/ui/cjk_font.h carries the same numbers)")
     ap.add_argument("--font-index", type=int, default=0, help="a face inside a .ttc (default 0)")
     ap.add_argument("--weight", type=int, default=500, help="the variable font's weight axis (0: its default)")
-    ap.add_argument("--supersample", type=int, default=2, help="render this much larger, then shrink (default 2)")
+    ap.add_argument("--supersample", type=int, default=2, help="render this much larger, then shrink (default 2; use 1 "
+                    "for a bitmap font, which has glyphs at its own size only)")
+    ap.add_argument("--size", type=int, help="the pixel size to load the font at (default: the cell times --supersample)")
     ap.add_argument("--threshold", type=int, default=100, help="coverage that counts as ink, 0-255 (default 100)")
     ap.add_argument("--po", help="take the characters from a gettext catalog's msgstr lines")
     ap.add_argument("--text", help="take the characters from this text instead")
@@ -192,6 +209,7 @@ def main():
     ap.add_argument("--out-c", required=True, help="the C file to write")
     ap.add_argument("--out-png", help="a preview image to write")
     args = ap.parse_args()
+    set_cell(args.cell)
 
     if not args.po and not args.text:
         ap.error("give --po or --text")
@@ -204,8 +222,9 @@ def main():
     if not chars:
         ap.error("no characters to build")
 
-    font = load_font(args.font, CELL * args.supersample, args.weight, args.font_index)
-    window = em_box(font, CELL * args.supersample)
+    size = args.size or CELL * args.supersample
+    font = load_font(args.font, size, args.weight, args.font_index)
+    window = em_box(font, size)
     glyphs, missing = [], []
     for ch in chars:
         rows = to_rows(rasterize(font, ch, window, args.threshold))

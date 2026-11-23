@@ -214,18 +214,22 @@ void ui_layout_init(void)
 	}
 
 #if CONFIG_LANG_ZH
-	// A CJK character is 16 px tall (core/ui/cjk_font.h), so a line that may hold Chinese needs a 16 px font, and only
-	// while the language in use is a wide one: English and Spanish keep the tighter layout in the same build. Where the
-	// layout already draws its words in one (the 240 px class), only the smallest font, which text pages use, moves up to
-	// it. Where it draws them in the 6x12 font (the 160 px class), those words move up to the 8x16 one, which costs Home
-	// its zone line and a list two rows on a 160x120 panel (docs/spec/ui.md 2.5). A 128x64 panel has no room for a 16 px
-	// line at all: its layout stays as it is and the board must not build the language in (BOARD_UNSUPPORTED,
-	// docs/build-config.md)
+	// A line that may hold Chinese needs a font at least as tall as the glyph cell (CJK_FONT_H, CONFIG_CJK_CELL), and
+	// only while the language in use is a wide one: English and Spanish keep the tighter layout in the same build.
+	//
+	// With the 16 px cell (CONFIG_CJK_CELL=16, an outline font): where the layout already draws its words in one (the
+	// 240 px class), only the smallest font, which text pages use, moves up to it. Where it draws them in the 6x12 font
+	// (the 160 px class), those words move up to the 8x16 one, which costs Home its zone line and a list two rows on a
+	// 160x120 panel (docs/spec/ui.md 2.5). A 128x64 panel has no room for a 16 px line at all: its layout stays as it is
+	// and the board must not build the language in (BOARD_UNSUPPORTED, docs/build-config.md).
+	//
+	// With a 12 px cell (a pixel font drawn at that size) the words already fit where they are, so nothing moves: the
+	// 160 px class keeps its 6x12 lines and the layout it has in English.
 	if (lang_wide(lang_current())) {
 		if (L->small->h >= CJK_FONT_H) {
 			if (L->tiny->h < CJK_FONT_H)
 				L->tiny = L->small;
-		} else if (w >= 150) {		// the 160 px class: 8x16 for lists, labels, the strip and the hints
+		} else if (w >= 150 && CJK_FONT_H > 12) {	// 160 px class, 16 px cell: 8x16 for lists, labels, strip and hints
 			L->small = f8;
 			L->tiny = f8;
 		}

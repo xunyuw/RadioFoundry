@@ -189,7 +189,7 @@
 #ifndef CONFIG_LANG_FR
 #define CONFIG_LANG_FR			0
 #endif
-// Chinese brings its own 16x16 glyphs (core/ui/cjk_font_data.c) and UTF-8 text the text layer decodes (core/ui/gfx.c)
+// Chinese brings its own glyphs (core/ui/cjk_font_data.c) and UTF-8 text the text layer decodes (core/ui/gfx.c)
 #ifndef CONFIG_LANG_ZH
 #define CONFIG_LANG_ZH			0
 #endif
@@ -197,6 +197,11 @@
 // menus stay on, for a board too small to show Chinese (docs/build-config.md). Defaults to LANG_ZH; a board sets it 0
 #ifndef CONFIG_CJK_GLYPHS
 #define CONFIG_CJK_GLYPHS		CONFIG_LANG_ZH
+#endif
+// The CJK glyph cell in pixels: 16 on a layout that draws its words in the 8x16 font, 12 where it draws them in the
+// 6x12 one (a 160x128 panel). tools/cjkfont.py --cell writes a table of the same size, and the two must agree.
+#ifndef CONFIG_CJK_CELL
+#define CONFIG_CJK_CELL			16
 #endif
 #define CONFIG_LANG_ANY			(CONFIG_LANG_ES || CONFIG_LANG_IT || CONFIG_LANG_FR || CONFIG_LANG_ZH)
 // The language the radio starts in until the user picks one (CONFIG_LANG_DEFAULT_<CODE>, needs its CONFIG_LANG_<CODE>):
