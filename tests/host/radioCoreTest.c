@@ -3373,7 +3373,7 @@ static void test_dmr_voice_features(void)
 	req(RREQ_DMR_TARGET, (int32_t)(9995555u | (1u << 24)));
 	run(20);
 	CHECK(d->target_manual && d->target_id == 9995555 && d->target_private);
-	CHECK(strcmp(d->target_name, "QD9XYZ Robert Lo") == 0);
+	CHECK(strcmp(d->target_name, "QD9XYZ Robert Longname S") == 0);
 	unsigned first = sim.air_count;
 	tx_once();
 	air_lc(first, &l);
@@ -3414,7 +3414,7 @@ static void test_dmr_voice_features(void)
 		run(60);
 	}
 	CHECK(d->state == RDMR_RX && d->call.to_us && !d->call.group && d->call.emergency);
-	CHECK(strcmp(d->call.src_name, "QD9XYZ Robert Lo") == 0);
+	CHECK(strcmp(d->call.src_name, "QD9XYZ Robert Longname S") == 0);
 	burst_lc(lc, 2, true);
 	run(100);
 	CHECK(d->reply_active && d->target_private && d->target_id == 9995555);	// the reply window
@@ -5527,7 +5527,7 @@ static void test_ui_settings(void)
 	storage_job_poll();
 	CHECK(chans[1].mode == RADIO_MODE_DMR);
 	setup_codeplug();
-	char l1[17], l2[17];
+	char l1[CODEPLUG_NAME_LEN + 1], l2[CODEPLUG_NAME_LEN + 1];
 	ui_svc_boot_text(l1, l2);
 	CHECK(l1[0] == 0 && l2[0] == 0);
 	req(RREQ_CLEAR_TEMP, 0);

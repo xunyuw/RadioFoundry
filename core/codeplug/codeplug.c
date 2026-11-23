@@ -378,11 +378,12 @@ bool name_field_ok(const uint8_t *p, unsigned len, bool *empty)
 	return true;
 }
 
-// A record that counts by its name: good when the name is valid and not empty
+// A record that counts by its name: good when the name is valid and not empty. The field is the open-firmware one
+// (16 octets): this counts stock records, whose name field never grows past what the vendor format has
 static void named(const uint8_t *p)
 {
 	bool empty;
-	if (name_field_ok(p, CODEPLUG_NAME_LEN, &empty) && !empty) {
+	if (name_field_ok(p, CODEPLUG_OPENFW_NAME_LEN, &empty) && !empty) {
 		ev_good++;
 	} else {
 		ev_bad++;
@@ -517,7 +518,7 @@ static void index_evidence(void)
 		}
 		if (n > 33u) {
 			ev_bad++;
-		} else if (flash_read(LIST_BASE + i * LIST_SIZE, r, CODEPLUG_NAME_LEN)) {
+		} else if (flash_read(LIST_BASE + i * LIST_SIZE, r, CODEPLUG_OPENFW_NAME_LEN)) {
 			named(r);
 		}
 	}
@@ -692,7 +693,7 @@ bool codeplug_openfw_decode(const uint8_t *r, channel_t *out)
 	if (!freq(&r[CH_RX], &out->rx_hz) || !freq(&r[CH_TX], &out->tx_hz)) {
 		return false;
 	}
-	copy_name(out->name, &r[CH_NAME], CODEPLUG_NAME_LEN);
+	copy_name(out->name, &r[CH_NAME], CODEPLUG_OPENFW_NAME_LEN);
 	out->mode = r[CH_MODE] == 1 ? RADIO_MODE_DMR : RADIO_MODE_FM;
 	out->bw = (r[CH_FLAG4] & FLAG4_25K) ? RADIO_BW_25K : RADIO_BW_12K5;
 	out->rx_tone = tone(le16(&r[CH_RX_TONE]));
@@ -731,7 +732,7 @@ bool codeplug_openfw_decode(const uint8_t *r, channel_t *out)
 static void blank_channel(uint8_t *r)
 {
 	memset(r, 0, CH_SIZE);
-	memset(&r[CH_NAME], 0xFF, CODEPLUG_NAME_LEN);
+	memset(&r[CH_NAME], 0xFF, CODEPLUG_OPENFW_NAME_LEN);
 	put16(&r[CH_RX_TONE], 0xFFFFu);
 	put16(&r[CH_TX_TONE], 0xFFFFu);
 	r[CH_DMR_ID + 1] = 0x16;	// the vendor defaults these bytes replaced
@@ -743,7 +744,7 @@ void codeplug_openfw_encode(const channel_t *ch, uint8_t *r)
 	if (!freq(&r[CH_RX], &rx)) {
 		blank_channel(r);	// not a record yet (erased or junk): start from the blank one
 	}
-	put_name(&r[CH_NAME], ch->name, CODEPLUG_NAME_LEN);
+	put_name(&r[CH_NAME], ch->name, CODEPLUG_OPENFW_NAME_LEN);
 	put_freq(&r[CH_RX], ch->rx_hz);
 	put_freq(&r[CH_TX], ch->tx_hz);
 	r[CH_MODE] = ch->mode == RADIO_MODE_DMR ? 1 : 0;
@@ -852,12 +853,12 @@ bool codeplug_channel_name(uint16_t number, char out[CODEPLUG_NAME_LEN + 1])
 	if (source != CODEPLUG_OPENFW) {
 		return false;
 	}
-	uint8_t r[CODEPLUG_NAME_LEN];
+	uint8_t r[CODEPLUG_OPENFW_NAME_LEN];
 	storage_lock();
 	bool ok = is_used(number) && flash_read(channel_addr(number) + CH_NAME, r, sizeof(r));
 	storage_unlock();
 	if (ok) {
-		copy_name(out, r, CODEPLUG_NAME_LEN);
+		copy_name(out, r, CODEPLUG_OPENFW_NAME_LEN);
 	}
 	return ok;
 }
@@ -893,7 +894,7 @@ bool codeplug_channel_names_each(codeplug_name_fn fn, void *ctx, bool names)
 			} else if (table || nested) {
 				got = codeplug_channel_name(k, name) ? name : NULL;
 			} else if (is_used(k)) {
-				copy_name(name, &scan_blk[(k - lo) * CH_SIZE + CH_NAME], CODEPLUG_NAME_LEN);
+				copy_name(name, &scan_blk[(k - lo) * CH_SIZE + CH_NAME], CODEPLUG_OPENFW_NAME_LEN);
 				got = name;
 			}
 			go = fn(k, got, ctx);
@@ -1028,7 +1029,7 @@ bool codeplug_start_new(void)
 	storage_lock();
 	bool ok = !codeplug_foreign();	// nothing to clear: the edit makes the codeplug as for a blank flash
 	if (!ok && storage_ready()) {
-		ok = flash_write(GEN_BASE, NULL, GEN_CLEAR) && flash_write(BOOT_TEXT, NULL, 2u * CODEPLUG_NAME_LEN) &&
+		ok = flash_write(GEN_BASE, NULL, GEN_CLEAR) && flash_write(BOOT_TEXT, NULL, 2u * CODEPLUG_OPENFW_NAME_LEN) &&
 		     flash_write(QUICK_KEYS, zero, CODEPLUG_QUICK_KEYS * 2u) &&
 		     flash_write(CONTACT_BASE, NULL, CONTACT_COUNT * CONTACT_SIZE) &&
 		     // The settings area: keys from before the other firmware (it never wrote there) would come back to
@@ -1321,12 +1322,12 @@ bool codeplug_set_quick_keys(const uint16_t in[CODEPLUG_QUICK_KEYS])
 
 void codeplug_boot_text(char line1[CODEPLUG_NAME_LEN + 1], char line2[CODEPLUG_NAME_LEN + 1])
 {
-	uint8_t b[2u * CODEPLUG_NAME_LEN];
+	uint8_t b[2u * CODEPLUG_OPENFW_NAME_LEN];
 	line1[0] = line2[0] = '\0';
 	storage_lock();
 	if (source == CODEPLUG_OPENFW && flash_read(BOOT_TEXT, b, sizeof(b))) {
-		copy_name(line1, b, CODEPLUG_NAME_LEN);
-		copy_name(line2, b + CODEPLUG_NAME_LEN, CODEPLUG_NAME_LEN);
+		copy_name(line1, b, CODEPLUG_OPENFW_NAME_LEN);
+		copy_name(line2, b + CODEPLUG_OPENFW_NAME_LEN, CODEPLUG_OPENFW_NAME_LEN);
 	}
 	storage_unlock();
 }
@@ -1469,9 +1470,9 @@ bool codeplug_set_radio_name(const char *name)
 
 bool codeplug_set_boot_text(const char *line1, const char *line2)
 {
-	uint8_t b[2u * CODEPLUG_NAME_LEN];
-	put_name(b, line1, CODEPLUG_NAME_LEN);
-	put_name(b + CODEPLUG_NAME_LEN, line2, CODEPLUG_NAME_LEN);
+	uint8_t b[2u * CODEPLUG_OPENFW_NAME_LEN];
+	put_name(b, line1, CODEPLUG_OPENFW_NAME_LEN);
+	put_name(b + CODEPLUG_OPENFW_NAME_LEN, line2, CODEPLUG_OPENFW_NAME_LEN);
 	storage_lock();
 	bool ok = materialize() && flash_write(BOOT_TEXT, b, sizeof(b));
 	if (ok) {
@@ -1541,7 +1542,7 @@ static bool contact_decode(const uint8_t *r, contact_t *out)
 		return false;
 	}
 	memset(out, 0, sizeof(*out));
-	copy_name(out->name, r, CODEPLUG_NAME_LEN);
+	copy_name(out->name, r, CODEPLUG_OPENFW_NAME_LEN);
 	out->type = r[0x14];
 	out->id = out->type == CONTACT_ALL_CALL ? 0xFFFFFFu : bcd_id(&r[0x10]);
 	if (out->id == 0) {
@@ -1597,7 +1598,7 @@ bool codeplug_set_contact(uint16_t index, const contact_t *c)
 	    (c->type != CONTACT_ALL_CALL && (c->id == 0 || c->id > 0xFFFFFFu)) || c->timeslot > 2) {
 		return false;
 	}
-	put_name(r, c->name, CODEPLUG_NAME_LEN);
+	put_name(r, c->name, CODEPLUG_OPENFW_NAME_LEN);
 	put_bcd_id(&r[0x10], c->type == CONTACT_ALL_CALL ? 0xFFFFFFu : c->id);
 	r[0x14] = c->type;
 	r[0x15] = 0;
@@ -1641,7 +1642,7 @@ bool codeplug_listen_list(uint16_t index, listen_list_t *out)
 		return false;
 	}
 	memset(out, 0, sizeof(*out));
-	copy_name(out->name, r, CODEPLUG_NAME_LEN);
+	copy_name(out->name, r, CODEPLUG_OPENFW_NAME_LEN);
 	unsigned members = n - 1u;
 	if (members > CODEPLUG_LIST_LEN) {
 		members = CODEPLUG_LIST_LEN;
@@ -1663,7 +1664,7 @@ bool codeplug_set_listen_list(uint16_t index, const listen_list_t *l)
 		return false;
 	}
 	memset(r, 0, sizeof(r));
-	put_name(r, l->name, CODEPLUG_NAME_LEN);
+	put_name(r, l->name, CODEPLUG_OPENFW_NAME_LEN);
 	for (unsigned i = 0; i < l->count; i++) {
 		if (l->contacts[i] == 0 || l->contacts[i] > CODEPLUG_CONTACTS_MAX) {
 			return false;

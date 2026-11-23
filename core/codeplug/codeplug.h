@@ -14,7 +14,13 @@
 #include "hal_radio.h"
 #include "config.h"
 
-#define CODEPLUG_NAME_LEN	16
+// The name field of the open-firmware (stock) record: 16 octets, ASCII and Latin-1, as the vendor format has it. The
+// radio copies a longer name into it as far as it fits, so a Chinese name loses its tail there and survives in the
+// native format (CODEPLUG_NAME_LEN).
+#define CODEPLUG_OPENFW_NAME_LEN	16
+// A name the codeplug holds: 24 octets, UTF-8 (codeplug-native.md 3). A Chinese name is 3 octets a character, so 24
+// holds 8 of them; a Latin name keeps its 24 characters. The native record is 64 octets, so the field fits there
+#define CODEPLUG_NAME_LEN	24
 // A name field's text valid: Latin-1 and 3-byte UTF-8 mixed, no stray continuation or control byte; a 3-byte lead
 // without its continuations is a Latin-1 byte. The rule the CPS and the radio use, also exposed for tests
 // (core/codeplug/codeplug.c)

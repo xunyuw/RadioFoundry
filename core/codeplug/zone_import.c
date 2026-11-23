@@ -342,7 +342,7 @@ static uint8_t add_system(const zsSystem_t *s)
 	kv_buf[1] = s->flags;		// listen only as the sender set it: a receiver never forces it (channel-modes.md 7.1)
 	kv_buf[2] = s->level;		// the sharing level it came with
 	kv_buf[3] = s->idLen;
-	strncpy((char *)&kv_buf[12], s->name, CODEPLUG_NAME_LEN);
+	strncpy((char *)&kv_buf[CODEPLUG_SYS_NAME], s->name, CODEPLUG_NAME_LEN);
 	if (s->blockLen > 0) {	// a shared system can come without a block (NULL)
 		memcpy(&kv_buf[CODEPLUG_SYS_HDR], s->block, s->blockLen);
 	}

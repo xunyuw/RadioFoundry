@@ -41,8 +41,10 @@ typedef struct {
 #define CODEPLUG_TRAFFIC_HDR	5u
 
 // A system record's header (7.1): type, flags, sharing, identity length, own ID (4), fallback channel (2) and its name
-// check (2), name (16); the type's block follows, its identity first
-#define CODEPLUG_SYS_HDR	28u
+// check (2), name (CODEPLUG_NAME_LEN); the type's block follows, its identity first. The name starts at
+// CODEPLUG_SYS_NAME (12), after those fixed fields
+#define CODEPLUG_SYS_NAME	12u
+#define CODEPLUG_SYS_HDR	(CODEPLUG_SYS_NAME + CODEPLUG_NAME_LEN)
 #define CODEPLUG_SYSTEMS_RUN	8u	// system numbers a radio runs, 0-7 (a stun names one in 3 bits): an import adds
 					// none past them
 #define CODEPLUG_SYS_NEEDS_KEY	0x01u	// flags: the system can't be used without its secret

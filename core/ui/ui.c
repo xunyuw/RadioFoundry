@@ -110,7 +110,7 @@ static void ui_task(void *arg)
 
 	if (have_fb) {
 		ui_layout_init();
-		char line1[17], line2[17];
+		char line1[CODEPLUG_NAME_LEN + 1], line2[CODEPLUG_NAME_LEN + 1];
 		ui_svc_boot_text(line1, line2);
 		// the release name when this is one (v26.11), else the commit
 		gfx_frame_begin();
