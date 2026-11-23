@@ -1261,16 +1261,18 @@ def cmd_probe(args):
 
 
 def cmd_font(args):
-    """Burn the CJK glyph bitmaps into the data flash region the board names (board.toml [flash.stub] font).
+    """Burn the CJK glyph bitmaps, or the pinyin tables, into the data flash region the board names.
 
-    The image is what tools/cjkfont.py --out-bin wrote: the glyphs in code point order, which the firmware's lookup
-    reads at CONFIG_CJK_FONT_ADDR. The radio must be running RadioFoundry with CONFIG_STUB_ENTRY, as for a serial
-    flash: stub/stubtool.py --write-font does the work (it enters its monitor, writes only the sectors that differ and
-    verifies them by CRC), and this hands it the address from the board's record."""
+    The image is what tools/cjkfont.py --out-bin (or tools/pinyin_table.py --out-bin) wrote: the bytes in the order the
+    firmware's lookup reads them at CONFIG_CJK_FONT_ADDR (--pinyin: CONFIG_PINYIN_ADDR). The radio must be running
+    RadioFoundry with CONFIG_STUB_ENTRY, as for a serial flash: stub/stubtool.py --write-font does the work (it enters
+    its monitor, writes only the sectors that differ and verifies them by CRC), and this hands it the address from the
+    board's record."""
     b = pick_board(args.board, "font")
-    region = b.stub.get("font") if b.stub else None
+    what = "pinyin" if args.pinyin else "font"
+    region = b.stub.get(what) if b.stub else None
     if region is None:
-        raise UsageError("%s has no CJK font region (board.toml [flash.stub] font); nothing to write" % b.name)
+        raise UsageError("%s has no %s region (board.toml [flash.stub] %s); nothing to write" % (b.name, what, what))
     lo, hi = region
     try:
         size = os.path.getsize(args.image)
@@ -1278,9 +1280,10 @@ def cmd_font(args):
         raise UsageError(str(e))
     block = 0x1000
     if not size or size % block or size > hi - lo:
-        raise UsageError("%s is %d bytes: the font region at 0x%X holds 0x%X bytes in whole 4 KB sectors "
-                         "(tools/cjkfont.py --out-bin writes it)" % (args.image, size, lo, hi - lo))
-    say("font     %s: %d bytes into 0x%06X-0x%06X, %d sectors" % (b.name, size, lo, lo + size, size // block))
+        raise UsageError("%s is %d bytes: the %s region at 0x%X holds 0x%X bytes in whole 4 KB sectors (%s --out-bin "
+                         "writes it)" % (args.image, size, what, lo, hi - lo,
+                                         "tools/pinyin_table.py" if args.pinyin else "tools/cjkfont.py"))
+    say("%-8s %s: %d bytes into 0x%06X-0x%06X, %d sectors" % (what, b.name, size, lo, lo + size, size // block))
     import stubtool
     argv = ["--board", b.id, "--write-font", args.image, "--q128-range", "0x%X:0x%X" % (lo, lo + size)]
     if args.port:
@@ -1460,6 +1463,7 @@ def build_parser():
     fnt.add_argument("image", help="the glyph bitmaps tools/cjkfont.py --out-bin wrote")
     fnt.add_argument("--board", help="the radio (its board.toml names the font row)")
     fnt.add_argument("--port", help="serial port of the radio running RadioFoundry")
+    fnt.add_argument("--pinyin", action="store_true", help="the file is the pinyin tables (tools/pinyin_table.py --out-bin) for the board's pinyin row, not the glyph bitmaps")
     fnt.add_argument("--dry-run", action="store_true", help="print what would be written and stop")
     fnt.set_defaults(fn=cmd_font)
 

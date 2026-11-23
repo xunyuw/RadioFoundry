@@ -151,6 +151,11 @@ spi = { bus = 1, mode = 0, hz = 4500000 }
 font = 0xF40000
 font_size = 0x2C000
 
+# The pinyin input method's tables (CONFIG_PINYIN_IN_FLASH): 32 KB right after the bitmaps, blank in every dump.
+# tools/pinyin_table.py --out-bin writes it and `rfoundry font` writes it to the row --pinyin names
+pinyin = 0xF6C000
+pinyin_size = 0x8000
+
 # The codec where the merge puts it (docs/spec/codec-placement.md): tables at their stock address, the code after them
 # (or at the start of sector 10 when it doesn't fit there) and the descriptor, all in sectors 10 and 11. stock lists the SHA-256 of each stock file rfoundry merges the codec
 # from (tools/rfoundry/rfoundry/stockfw.py PROFILES)

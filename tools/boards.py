@@ -240,6 +240,9 @@ BOARD_SCHEMA = {
                       # tools/cjkfont.py --out-bin writes them; like write_test it must be blank in every dump
                       "font": _opt(int),
                       "font_size": _opt(int),
+                      # the pinyin tables' row (CONFIG_PINYIN_ADDR), tools/pinyin_table.py --out-bin
+                      "pinyin": _opt(int),
+                      "pinyin_size": _opt(int),
                       # where the factory calibration is, for a backup: in a data flash, the 4 KB page of the stock
                       # codeplug area [0, area) whose last byte is page_id; on a radio whose data memory is a NAND,
                       # the 4 KB sectors of the program flash (progmem) and the NAND (nand) that each hold a copy
@@ -778,6 +781,8 @@ class Board:
         # start and end of the CJK glyph bitmaps; the size is tools/cjkfont.py's to choose (font_size states it)
         if "font" in s:
             out["font"] = [s["font"], s["font"] + s.get("font_size", 0)]
+            if "pinyin" in s:
+                out["pinyin"] = [s["pinyin"], s["pinyin"] + s.get("pinyin_size", 0)]
         return out
 
     def map_areas(self):
@@ -1378,6 +1383,17 @@ def check(root=ROOT):
                                                    [p for p in b.protect if p["mem"] == "data"], b.write_floor,
                                                    stub["font_size"]):
                         bad("flash.stub font 0x%X: %s" % (fn, why))
+
+                pn = stub.get("pinyin")
+                if "pinyin_size" in stub and pn is None:
+                    bad("flash.stub pinyin_size needs pinyin")
+                if pn is not None and "pinyin_size" not in stub:
+                    bad("flash.stub pinyin 0x%X needs pinyin_size (the tables' length)" % pn)
+                if pn is not None and "pinyin_size" in stub:
+                    for why in write_test_problems(pn, b.nand, b.data["flash"]["backup"]["spi_size"], b.map_areas(),
+                                                   [p for p in b.protect if p["mem"] == "data"], b.write_floor,
+                                                   stub["pinyin_size"]):
+                        bad("flash.stub pinyin 0x%X: %s" % (pn, why))
                 cal = stub.get("calibration")
                 if cal is not None and set(cal) not in ({"area", "page_id"}, {"data"}, {"progmem", "nand", "magic"}):
                     bad("flash.stub calibration is {area, page_id} or {data} (a data flash) or {progmem, nand, magic} (a NAND)")

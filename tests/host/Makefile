@@ -681,6 +681,13 @@ TESTS   += gfxTestZh
 gfxTestZh: gfxTest.c $(UI) $(CJK) $(LANG_H) $(wildcard $(CORE)/ui/*.h $(CORE)/ui/fonts/*.inc)
 	$(CC) $(CFLAGS) -I$(ROOT)/hal -Iout/gen -Wshadow -DGFX_INDEXED=1 -DCONFIG_NET_WEBCTL=1 -DCONFIG_LANG_ZH=1 -o $@ gfxTest.c $(UI) $(CJK)
 
+# The pinyin input method's search (core/ui/pinyin.c): the readings sorted, a prefix reaching every reading that
+# starts with it, the pages holding no character twice. Built with the tables tools/pinyin_table.py wrote
+TESTS   += pinyinTest
+pinyinTest: pinyinTest.c $(CORE)/ui/pinyin.c $(CORE)/ui/pinyin_data.c $(wildcard $(CORE)/ui/*.h)
+	$(CC) $(CFLAGS) -I$(CORE) -I$(CORE)/ui -I$(ROOT)/hal -Iout/gen -Wall -Wextra -DGFX_INDEXED=1 -DCONFIG_LANG_ZH=1 \
+	      -DCONFIG_PINYIN=1 -o $@ pinyinTest.c $(CORE)/ui/pinyin.c $(CORE)/ui/pinyin_data.c
+
 # The frame buffer's last bytes with a GFX_FB_BYTES that is not a multiple of 4 (the DM-32UV's, sized from its insets):
 # a safe area of exactly that size, drawn to its bottom right corner. Always under AddressSanitizer, which is what sees
 # a write past the buffer: without it the bytes land in the next variable and nothing fails
@@ -774,7 +781,7 @@ ui-sheets: uiSim
 	UI_GALLERY_COLORS="$(UI_GALLERY_COLORS)" ./uiSim --sheets out/sheets $(GEOM)
 
 run: run-ui
-run-ui: gfxTest gfxTestZh gfxFbEdgeTest i18nTest i18nTestNoLang i18nTestDefault uiFlowTest uiFlowTestNoColor uiFlowTestSatellite uiSim beepReel
+run-ui: gfxTest gfxTestZh gfxFbEdgeTest i18nTest i18nTestNoLang i18nTestDefault uiFlowTest uiFlowTestNoColor uiFlowTestSatellite uiSim beepReel pinyinTest
 	./gfxTest
 	./gfxTestZh
 	./gfxFbEdgeTest

@@ -209,6 +209,21 @@
 #ifndef CONFIG_CJK_FONT_IN_FLASH
 #define CONFIG_CJK_FONT_IN_FLASH	0
 #endif
+// The pinyin input method (core/ui/pinyin.c, tools/pinyin_table.py): a keypad types Latin letters and the editor
+// offers the Chinese characters they spell, so a name is entered on the radio and not only by a computer. The tables
+// are 30 KB of rodata and the search needs no RAM. Needs CONFIG_LANG_ZH (the characters have to draw)
+#ifndef CONFIG_PINYIN
+#define CONFIG_PINYIN			0
+#endif
+// Keep the pinyin tables in the data flash (tools/pinyin_table.py --out-bin) instead of the application region: a board
+// with CONFIG_CJK_FONT_IN_FLASH has the room there for both. CONFIG_PINYIN_ADDR is where the blob was written, after
+// the CJK bitmaps
+#ifndef CONFIG_PINYIN_IN_FLASH
+#define CONFIG_PINYIN_IN_FLASH		0
+#endif
+#ifndef CONFIG_PINYIN_ADDR
+#define CONFIG_PINYIN_ADDR		0xF6C000
+#endif
 #define CONFIG_LANG_ANY			(CONFIG_LANG_ES || CONFIG_LANG_IT || CONFIG_LANG_FR || CONFIG_LANG_ZH)
 // The language the radio starts in until the user picks one (CONFIG_LANG_DEFAULT_<CODE>, needs its CONFIG_LANG_<CODE>):
 // all 0 = English
