@@ -1777,7 +1777,7 @@ static void sim_names_reset(void)
 	strcpy(sim_names[UI_NAME_BOOT1], "Q0TEST");
 	strcpy(sim_names[UI_NAME_BOOT2], "Jamie Thompson");
 }
-void ui_svc_name_get(uint8_t which, char out[17])
+void ui_svc_name_get(uint8_t which, char out[CODEPLUG_NAME_LEN + 1])
 {
 	strcpy(out, which < UI_NAME_COUNT ? sim_names[which] : "");
 }
@@ -1785,12 +1785,12 @@ bool ui_svc_name_set(uint8_t which, const char *text)
 {
 	if (which >= UI_NAME_COUNT)
 		return false;
-	strncpy(sim_names[which], text, 16);
-	sim_names[which][16] = '\0';
+	strncpy(sim_names[which], text, CODEPLUG_NAME_LEN);
+	sim_names[which][CODEPLUG_NAME_LEN] = '\0';
 	sim_rec.codeplug_writes++;
 	return true;
 }
-void ui_svc_boot_text(char line1[17], char line2[17])
+void ui_svc_boot_text(char line1[CODEPLUG_NAME_LEN + 1], char line2[CODEPLUG_NAME_LEN + 1])
 {
 	strcpy(line1, sim_names[UI_NAME_BOOT1]);
 	strcpy(line2, sim_names[UI_NAME_BOOT2]);

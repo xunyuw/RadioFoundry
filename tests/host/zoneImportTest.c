@@ -432,7 +432,7 @@ static void test_names_and_list(void)
 
 	fresh();
 	with_zones();
-	// A 16-character name taken: the suffix replaces its end
+	// The same name three times: the second and third get a suffix, which fits the 24 octets here
 	for (int i = 0; i < 3; i++) {
 		zsWriterBegin(&w, recbuf, sizeof(recbuf), 7, 0, "Sixteen chars ok");
 		zsWriterChannel(&w, &zc);
@@ -443,8 +443,8 @@ static void test_names_and_list(void)
 	zone_t z;
 
 	CHECK(codeplug_zone(1, &z) && strcmp(z.name, "Sixteen chars ok") == 0);
-	CHECK(codeplug_zone(2, &z) && strcmp(z.name, "Sixteen chars 2") == 0);
-	CHECK(codeplug_zone(3, &z) && strcmp(z.name, "Sixteen chars 3") == 0);
+	CHECK(codeplug_zone(2, &z) && strcmp(z.name, "Sixteen chars ok 2") == 0);
+	CHECK(codeplug_zone(3, &z) && strcmp(z.name, "Sixteen chars ok 3") == 0);
 	// The list keeps the newest SETTINGS_ZS_IMPORTS
 	for (int i = 3; i < 6; i++) {
 		zsWriterBegin(&w, recbuf, sizeof(recbuf), 7, 0, "Z");
