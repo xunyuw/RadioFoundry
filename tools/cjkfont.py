@@ -115,6 +115,21 @@ def gb2312_level1():
     return chars
 
 
+def gb2312_all():
+    """Every character GB2312 codes (7445: the 3755 of level 1, 3008 of level 2 and the symbol rows): the whole set a
+    Chinese codeplug or a user's own name can hold, drawn so no channel name meets a box."""
+    chars = set()
+    for hb in range(0xA1, 0xFF):
+        for lb in range(0xA1, 0xFF):
+            try:
+                ch = bytes([hb, lb]).decode("gb2312")
+            except UnicodeDecodeError:
+                continue
+            if len(ch) == 1:
+                chars.add(ch)
+    return chars
+
+
 def codepoint_ok(cp):
     # The BMP only: a catalog's UTF-8 never carries a surrogate, and every CJK block is below U+10000
     return 0 < cp <= 0xFFFF and not 0xD800 <= cp <= 0xDFFF
@@ -201,7 +216,10 @@ def main():
     ap.add_argument("--text", help="take the characters from this text instead")
     ap.add_argument("--chars-file", help="also take the characters from a UTF-8 name list (# comments ignored)")
     ap.add_argument("--gb2312-level1", action="store_true",
-                    help="also the 3755 common ideographs (GB2312 level 1), so Chinese channel names draw")
+                    help="also take the 3755 level 1 (common) ideographs of GB2312")
+    ap.add_argument("--gb2312", action="store_true",
+                    help="also take every character GB2312 codes (7445): the whole set a Chinese codeplug or a user's "
+                         "own name can hold, so no channel name draws a box")
     ap.add_argument("--font-name", default="", help="the font and its version, for the generated file's notice")
     ap.add_argument("--copyright", required=True, help="the font's copyright line (SPDX-FileCopyrightText)")
     ap.add_argument("--license", required=True, help="the font's license text, carried in the generated file")
@@ -217,13 +235,15 @@ def main():
     args = ap.parse_args()
     set_cell(args.cell)
 
-    if not args.po and not args.text and not args.chars_file and not args.gb2312_level1:
-        ap.error("give --po, --text, --chars-file or --gb2312-level1")
+    if not args.po and not args.text and not args.chars_file and not args.gb2312_level1 and not args.gb2312:
+        ap.error("give --po, --text, --chars-file, --gb2312-level1 or --gb2312")
     chars = chars_from_po(args.po) if args.po else (set(args.text) if args.text else set())
     if args.chars_file:
         chars |= chars_from_file(args.chars_file)
     if args.gb2312_level1:
         chars |= gb2312_level1()
+    if args.gb2312:
+        chars |= gb2312_all()
     chars = sorted(ch for ch in chars if codepoint_ok(ord(ch)) and not ch.isspace())
     if not chars:
         ap.error("no characters to build")
