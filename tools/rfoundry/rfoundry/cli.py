@@ -1283,9 +1283,21 @@ def cmd_font(args):
         raise UsageError("%s is %d bytes: the %s region at 0x%X holds 0x%X bytes in whole 4 KB sectors (%s --out-bin "
                          "writes it)" % (args.image, size, what, lo, hi - lo,
                                          "tools/pinyin_table.py" if args.pinyin else "tools/cjkfont.py"))
+    if args.check and size != hi - lo:
+        # A comparison has to cover the whole row: a shorter file would call a radio identical whose tail is another
+        # build's
+        raise UsageError("%s is %d bytes but the %s region holds %d: --check compares the whole row, so give the file "
+                         "that was burned there" % (args.image, size, what, hi - lo))
     say("%-8s %s: %d bytes into 0x%06X-0x%06X, %d sectors" % (what, b.name, size, lo, lo + size, size // block))
     import stubtool
-    argv = ["--board", b.id, "--write-font", args.image, "--q128-range", "0x%X:0x%X" % (lo, lo + size)]
+    # The row's address is the board's and the stub tools take it from the same record, so no range is passed here: one
+    # number in two places is one that can disagree
+    argv = ["--board", b.id]
+    if args.check:
+        # Read the row back and compare, writing nothing: is this file the one the radio has?
+        argv += ["--check-font", what, "--write-font", args.image]
+    else:
+        argv += ["--font-row", what, "--write-font", args.image]
     if args.port:
         argv.insert(0, args.port)
     if args.dry_run:
@@ -1464,6 +1476,9 @@ def build_parser():
     fnt.add_argument("--board", help="the radio (its board.toml names the font row)")
     fnt.add_argument("--port", help="serial port of the radio running RadioFoundry")
     fnt.add_argument("--pinyin", action="store_true", help="the file is the pinyin tables (tools/pinyin_table.py --out-bin) for the board's pinyin row, not the glyph bitmaps")
+    fnt.add_argument("--check", action="store_true",
+                     help="read the region back and compare it with the file, writing nothing: says whether this "
+                          "file is the one the radio has")
     fnt.add_argument("--dry-run", action="store_true", help="print what would be written and stop")
     fnt.set_defaults(fn=cmd_font)
 

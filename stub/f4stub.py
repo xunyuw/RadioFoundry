@@ -1023,6 +1023,12 @@ def leave_stub(radio, a, board, log=print):
     log("if the radio still runs the stub, leave it with: %s" % cmd)
 
 
+def font_row_of(a):
+    """Which board row a font operation names: --check-font says it outright, a write takes --font-row (default font).
+    Separate from run() so the self-test can hold the rule that a pinyin write never lands on the glyph row."""
+    return a.check_font or a.font_row or "font"
+
+
 def run(a, port, reopen, log=print):
     """stubtool.py's STM32 branch: a is its parsed arguments, port the open serial port."""
     radio = F4Radio(port, log=log, retries=a.retries, reopen=reopen)
@@ -1092,21 +1098,39 @@ def run(a, port, reopen, log=print):
         nw, nk = radio.spi_write(data, start, progress=lambda i, n: log("SPI sector %d of %d" % (i, n)) if i % 64 == 0 or i == n else None)
         log("%s: SPI flash from 0x%06X, %d sector(s) written, %d unchanged, verified by CRC, %.0f s" % (
             a.write_q128, start, nw, nk, time.monotonic() - t0))
-    if a.write_font:
-        # The CJK glyph bitmaps into the row the board names (board.toml [flash.stub] font): the firmware reads them
-        # there at CONFIG_CJK_FONT_ADDR (core/ui/cjk_font.c), so the address is the board's, never the file's
-        row = (a.board.stub or {}).get("font") if a.board is not None else None
+    if a.check_font or a.write_font:
+        # The rows a board names (board.toml [flash.stub] font / pinyin): the firmware reads the bitmaps at
+        # CONFIG_CJK_FONT_ADDR and the pinyin tables at CONFIG_PINYIN_ADDR, so the address is the board's, never
+        # the file's
+        what = font_row_of(a)
+        b = rfoundryboards.BOARDS.get(a.board) if isinstance(a.board, str) else a.board
+        row = (b.stub or {}).get(what) if b is not None and b.stub else None
         if row is None:
-            raise F4Error("no board or no CJK font row: --board and a board.toml [flash.stub] font are needed")
+            raise F4Error("no board or no %s row: --board and a board.toml [flash.stub] %s are needed" % (what, what))
         lo, hi = row
+        if not a.write_font:
+            raise F4Error("give the file in --write-font (tools/%s --out-bin wrote it)"
+                          % ("pinyin_table.py" if what == "pinyin" else "cjkfont.py"))
         data = open(a.write_font, "rb").read()
         if not data or len(data) % BLOCK or len(data) > hi - lo:
-            raise F4Error("%s is %d bytes: the font row 0x%X-0x%X holds a whole number of 4 KB sectors, up to %d"
-                          % (a.write_font, len(data), lo, hi, (hi - lo) // BLOCK))
-        log("%s: %d bytes into the font row 0x%06X-0x%06X" % (a.write_font, len(data), lo, lo + len(data)))
-        t0 = time.monotonic()
-        nw, nk = radio.spi_write(data, lo, progress=lambda i, n: log("font sector %d of %d" % (i, n)))
-        log("%s: %d sector(s) written, %d unchanged, verified by CRC, %.0f s" % (a.write_font, nw, nk, time.monotonic() - t0))
+            raise F4Error("%s is %d bytes: the %s row 0x%X-0x%X holds a whole number of 4 KB sectors, up to %d"
+                          % (a.write_font, len(data), what, lo, hi, (hi - lo) // BLOCK))
+        if a.check_font:
+            bad = radio.verify_file(data, lo, MEM_SPI)
+            blank = radio.verify_file(b"\xff" * len(data), lo, MEM_SPI)
+            if not bad:
+                log("%s row 0x%06X-0x%06X: the file is there, %d sectors identical" % (what, lo, lo + len(data), len(data) // BLOCK))
+            elif len(blank) == len(data) // BLOCK:
+                log("%s row 0x%06X-0x%06X: BLANK, nothing burned in: run --write-font" % (what, lo, lo + len(data)))
+            else:
+                log("%s row 0x%06X-0x%06X: DIFFERS, %d of %d sectors: run --write-font"
+                    % (what, lo, lo + len(data), len(bad), len(data) // BLOCK))
+        else:
+            log("%s: %d bytes into the %s row 0x%06X-0x%06X" % (a.write_font, len(data), what, lo, lo + len(data)))
+            t0 = time.monotonic()
+            nw, nk = radio.spi_write(data, lo, progress=lambda i, n: log("%s sector %d of %d" % (what, i, n)))
+            log("%s: %d sector(s) written, %d unchanged, verified by CRC, %.0f s"
+                % (a.write_font, nw, nk, time.monotonic() - t0))
     if a.secreg or a.write_secreg:
         def locks(sr2):
             return "status register 2 = 0x%02X, %s" % (sr2, ", ".join(
@@ -1676,6 +1700,14 @@ def self_test():
     check(board_for("DM-1701") == "dm1701" and board_for("MD-380 VHF") == "md380" and board_for("DM-32UV") is None,
           "board names")
     check(inside_git_tree(os.path.abspath(__file__)), "dumps are refused inside this git tree")
+
+    # Which board row a font operation names. A write has no --check-font, so taking the row from that alone sent every
+    # pinyin write to the glyph row (found on a radio: the glyph row read back as the pinyin table's "a").
+    from types import SimpleNamespace as NS
+    check(font_row_of(NS(check_font="font", font_row="pinyin")) == "font", "a check names its row")
+    check(font_row_of(NS(check_font="pinyin", font_row="font")) == "pinyin", "a pinyin check names the pinyin row")
+    check(font_row_of(NS(check_font=None, font_row="font")) == "font", "a write defaults to the glyphs")
+    check(font_row_of(NS(check_font=None, font_row="pinyin")) == "pinyin", "a pinyin write reaches the pinyin row")
 
     # The SPI flash: a backup read back, a changed copy written (only its changed sectors), and a stub without one
     spi = bytearray((i * 13 + (i >> 12)) & 0xFF for i in range(0x100000))

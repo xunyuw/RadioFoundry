@@ -3240,6 +3240,11 @@ def main(argv=None, raise_errors=False):
     ap.add_argument("--verify-q128", metavar="FILE", help="compare the data flash with FILE by CRC")
     ap.add_argument("--write-q128", metavar="FILE", help="STM32 radios: write FILE into the SPI flash from --q128-range's "
                     "start (default 0), changed 4 KB sectors only, each verified by CRC")
+    ap.add_argument("--font-row", choices=("font", "pinyin"), default="font", metavar="{font,pinyin}",
+                    help="with --write-font: the row to write (default font, the glyph bitmaps)")
+    ap.add_argument("--check-font", choices=("font", "pinyin"), metavar="{font,pinyin}",
+                    help="STM32 radios: read the board's font (or pinyin) row back and compare it with --write-font's "
+                         "file, writing nothing")
     ap.add_argument("--write-font", metavar="FILE", help="STM32 radios: write the CJK glyph bitmaps FILE (tools/cjkfont.py "
                     "--out-bin) into the board's font region (board.toml [flash.stub] font), changed sectors only")
     ap.add_argument("--secreg", metavar="FILE", help="STM32 radios: read the SPI flash's three 256-byte security registers "
@@ -3324,7 +3329,7 @@ def main(argv=None, raise_errors=False):
                 ap.error("--nand needs --nand-range (the chip is 256 MB)")
             jobs.append((mem, f, rng))
     if not (jobs or a.probe or a.peek or a.verify_progmem or a.verify_q128 or a.verify_nand or a.led_test or a.led_seq or a.boot or a.write_test or a.write_app or a.write_q128
-            or a.secreg or a.write_secreg or a.write_font):
+            or a.secreg or a.write_secreg or a.write_font or a.check_font):
         ap.error("nothing to do: give --progmem, --q128, --verify-*, --probe, --peek or OUT")
     if (a.secreg or a.write_secreg) and a.board in C7_BOARDS:
         ap.error("--secreg and --write-secreg are for the STM32 radios; the HR_C7000 stub has no security register ops")
