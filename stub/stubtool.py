@@ -594,10 +594,11 @@ def check_univ_load(image, load, window=None):
 C7_BOARDS = {b.id: {"id": b.stub["id"], "name": b.model, "names": tuple(b.debuglink_names), "latch": b.stub["latch"],
                     "key": b.stub["key"], "nand": b.stub["nand"], "progmem": b.stub["progmem"], "rom_entry": b.stub.get("rom_entry"),
                     "led": b.stub.get("led") or {"red": LED_RED, "green": LED_GREEN}, "protect": b.protect,
-                    "write_test": b.stub.get("write_test")}
+                    "write_test": b.stub.get("write_test"), "font": b.stub.get("font")}
              for b in rfoundryboards.BOARDS.values() if b.stub and b.stub["tool"] == "stubtool"}
 GENERIC = {"id": 0, "name": "HR_C7000 radio", "names": (), "latch": 255, "key": 255, "nand": False, "progmem": 0x100000,
-           "rom_entry": None, "led": {"red": 255, "green": 255}, "protect": [], "write_test": None}   # an unknown radio: no pin driven as an LED
+           "rom_entry": None, "led": {"red": 255, "green": 255}, "protect": [], "write_test": None,
+           "font": None}   # an unknown radio: no pin driven as an LED
 # The tool installs at one application start, which every board must use: a radio whose bootloader ends elsewhere has to
 # give this tool and the web flasher a per-board start first, or an install would overwrite the end of that bootloader
 for _b in rfoundryboards.BOARDS.values():
@@ -1336,10 +1337,16 @@ class Radio:
 
     def write_ok(self, mem):
         """The regions a write or erase may touch besides the application: the program flash's test sectors, and the data
-        flash's the board profile names (none on a radio without one)."""
+        flash's the board profile names (none on a radio without one): its test area, and the CJK glyph region."""
         if mem == "q128":
+            ok = []
             wt = self.profile.get("write_test")
-            return [tuple(wt)] if wt is not None else []
+            if wt is not None:
+                ok.append(tuple(wt))
+            fn = self.profile.get("font")
+            if fn is not None:
+                ok.append(tuple(fn))
+            return ok
         return list(WRITE_OK.get(mem, []))
 
     def erase_sectors(self, mem, start, end):
@@ -3233,6 +3240,8 @@ def main(argv=None, raise_errors=False):
     ap.add_argument("--verify-q128", metavar="FILE", help="compare the data flash with FILE by CRC")
     ap.add_argument("--write-q128", metavar="FILE", help="STM32 radios: write FILE into the SPI flash from --q128-range's "
                     "start (default 0), changed 4 KB sectors only, each verified by CRC")
+    ap.add_argument("--write-font", metavar="FILE", help="STM32 radios: write the CJK glyph bitmaps FILE (tools/cjkfont.py "
+                    "--out-bin) into the board's font region (board.toml [flash.stub] font), changed sectors only")
     ap.add_argument("--secreg", metavar="FILE", help="STM32 radios: read the SPI flash's three 256-byte security registers "
                     "(the DM-1701 family's factory calibration and flags) into FILE (768 bytes), and print their lock bits")
     ap.add_argument("--write-secreg", metavar="FILE", help="STM32 radios: write FILE (768 bytes, registers 1-3) into the "
@@ -3315,7 +3324,7 @@ def main(argv=None, raise_errors=False):
                 ap.error("--nand needs --nand-range (the chip is 256 MB)")
             jobs.append((mem, f, rng))
     if not (jobs or a.probe or a.peek or a.verify_progmem or a.verify_q128 or a.verify_nand or a.led_test or a.led_seq or a.boot or a.write_test or a.write_app or a.write_q128
-            or a.secreg or a.write_secreg):
+            or a.secreg or a.write_secreg or a.write_font):
         ap.error("nothing to do: give --progmem, --q128, --verify-*, --probe, --peek or OUT")
     if (a.secreg or a.write_secreg) and a.board in C7_BOARDS:
         ap.error("--secreg and --write-secreg are for the STM32 radios; the HR_C7000 stub has no security register ops")

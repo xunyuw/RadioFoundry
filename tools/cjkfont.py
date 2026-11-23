@@ -248,12 +248,15 @@ def main():
 
     if args.out_bin:
         # One glyph after the other in code point order, CELL rows of ROW_BYTES each: the lookup multiplies the
-        # index of the code point in cjk_font_cp by GLYPH_BYTES and reads from cjk_font_addr + that
+        # index of the code point in cjk_font_cp by GLYPH_BYTES and reads from cjk_font_addr + that. The data flash
+        # erases in 4 KB sectors, so the file is padded to a whole sector with 0xFF (the glyphs end before the pad)
+        blob = b"".join(b"".join(rows) for _, _, rows in glyphs)
+        pad = (-len(blob)) % 0x1000
         with open(args.out_bin, "wb") as fb:
-            for _, _, rows in glyphs:
-                for row in rows:
-                    fb.write(row)
-        print("cjkfont: %s holds %d glyphs, %d bytes" % (args.out_bin, len(glyphs), len(glyphs) * GLYPH_BYTES))
+            fb.write(blob)
+            fb.write(b"\xff" * pad)
+        print("cjkfont: %s holds %d glyphs, %d bytes of glyphs, %d bytes padded to whole 4 KB sectors"
+              % (args.out_bin, len(glyphs), len(blob), len(blob) + pad))
 
     name = args.font_name or os.path.basename(args.font)
     with open(args.font, "rb") as f:

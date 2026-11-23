@@ -1260,6 +1260,37 @@ def cmd_probe(args):
     return 0
 
 
+def cmd_font(args):
+    """Burn the CJK glyph bitmaps into the data flash region the board names (board.toml [flash.stub] font).
+
+    The image is what tools/cjkfont.py --out-bin wrote: the glyphs in code point order, which the firmware's lookup
+    reads at CONFIG_CJK_FONT_ADDR. The radio must be running RadioFoundry with CONFIG_STUB_ENTRY, as for a serial
+    flash: stub/stubtool.py --write-font does the work (it enters its monitor, writes only the sectors that differ and
+    verifies them by CRC), and this hands it the address from the board's record."""
+    b = pick_board(args.board, "font")
+    region = b.stub.get("font") if b.stub else None
+    if region is None:
+        raise UsageError("%s has no CJK font region (board.toml [flash.stub] font); nothing to write" % b.name)
+    lo, hi = region
+    try:
+        size = os.path.getsize(args.image)
+    except OSError as e:
+        raise UsageError(str(e))
+    block = 0x1000
+    if not size or size % block or size > hi - lo:
+        raise UsageError("%s is %d bytes: the font region at 0x%X holds 0x%X bytes in whole 4 KB sectors "
+                         "(tools/cjkfont.py --out-bin writes it)" % (args.image, size, lo, hi - lo))
+    say("font     %s: %d bytes into 0x%06X-0x%06X, %d sectors" % (b.name, size, lo, lo + size, size // block))
+    import stubtool
+    argv = ["--board", b.id, "--write-font", args.image, "--q128-range", "0x%X:0x%X" % (lo, lo + size)]
+    if args.port:
+        argv.insert(0, args.port)
+    if args.dry_run:
+        say("dry run  would run: stubtool.py %s" % " ".join(argv))
+        return 0
+    return stubtool.main(argv)
+
+
 def cmd_detect(args):
     p = debuglink.probe(args.port, log=say) if not args.no_probe else None
     if p:
@@ -1423,6 +1454,14 @@ def build_parser():
     d = sub.add_parser("detect", help="look for the radio: running RadioFoundry and/or in its bootloader")
     common(d)
     d.set_defaults(fn=cmd_detect)
+
+    fnt = sub.add_parser("font", help="write the CJK glyph bitmaps into the radio's data flash",
+                         formatter_class=argparse.RawDescriptionHelpFormatter)
+    fnt.add_argument("image", help="the glyph bitmaps tools/cjkfont.py --out-bin wrote")
+    fnt.add_argument("--board", help="the radio (its board.toml names the font row)")
+    fnt.add_argument("--port", help="serial port of the radio running RadioFoundry")
+    fnt.add_argument("--dry-run", action="store_true", help="print what would be written and stop")
+    fnt.set_defaults(fn=cmd_font)
 
     k = sub.add_parser("key", help="get the bootloader key from a radio running RadioFoundry, or from a stock firmware file")
     k.add_argument("--stock", help="derive it from this stock file instead of reading it from the radio")

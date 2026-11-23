@@ -236,6 +236,10 @@ BOARD_SCHEMA = {
                       # stubtool --write-test erases and programs; it must not overlap stored or protected data
                       "write_test": _opt(int),
                       "write_test_size": _opt(int),
+                      # data flash offset where the CJK glyph bitmaps live (CONFIG_CJK_FONT_ADDR), and their length as
+                      # tools/cjkfont.py --out-bin writes them; like write_test it must be blank in every dump
+                      "font": _opt(int),
+                      "font_size": _opt(int),
                       # where the factory calibration is, for a backup: in a data flash, the 4 KB page of the stock
                       # codeplug area [0, area) whose last byte is page_id; on a radio whose data memory is a NAND,
                       # the 4 KB sectors of the program flash (progmem) and the NAND (nand) that each hold a copy
@@ -771,6 +775,9 @@ class Board:
                 out["calibration"] = s["calibration"]
             if "write_test" in s:		# start and end: the length defaults to 16 KB
                 out["write_test"] = [s["write_test"], s["write_test"] + s.get("write_test_size", STUB_WRITE_TEST)]
+        # start and end of the CJK glyph bitmaps; the size is tools/cjkfont.py's to choose (font_size states it)
+        if "font" in s:
+            out["font"] = [s["font"], s["font"] + s.get("font_size", 0)]
         return out
 
     def map_areas(self):
@@ -1360,6 +1367,17 @@ def check(root=ROOT):
                                                    [p for p in b.protect if p["mem"] == "data"], b.write_floor,
                                                    stub.get("write_test_size", STUB_WRITE_TEST)):
                         bad("flash.stub write_test 0x%X: %s" % (wt, why))
+                fn = stub.get("font")
+                if "font_size" in stub and fn is None:
+                    bad("flash.stub font_size needs font")
+                if fn is not None and "font_size" not in stub:
+                    bad("flash.stub font 0x%X needs font_size (the glyph bitmaps' length)" % fn)
+                if fn is not None and "font_size" in stub:
+                    # Same rules as write_test: on a sector boundary, past the radio's own data, blank in the dumps
+                    for why in write_test_problems(fn, b.nand, b.data["flash"]["backup"]["spi_size"], b.map_areas(),
+                                                   [p for p in b.protect if p["mem"] == "data"], b.write_floor,
+                                                   stub["font_size"]):
+                        bad("flash.stub font 0x%X: %s" % (fn, why))
                 cal = stub.get("calibration")
                 if cal is not None and set(cal) not in ({"area", "page_id"}, {"data"}, {"progmem", "nand", "magic"}):
                     bad("flash.stub calibration is {area, page_id} or {data} (a data flash) or {progmem, nand, magic} (a NAND)")

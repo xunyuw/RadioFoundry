@@ -1092,6 +1092,21 @@ def run(a, port, reopen, log=print):
         nw, nk = radio.spi_write(data, start, progress=lambda i, n: log("SPI sector %d of %d" % (i, n)) if i % 64 == 0 or i == n else None)
         log("%s: SPI flash from 0x%06X, %d sector(s) written, %d unchanged, verified by CRC, %.0f s" % (
             a.write_q128, start, nw, nk, time.monotonic() - t0))
+    if a.write_font:
+        # The CJK glyph bitmaps into the row the board names (board.toml [flash.stub] font): the firmware reads them
+        # there at CONFIG_CJK_FONT_ADDR (core/ui/cjk_font.c), so the address is the board's, never the file's
+        row = (a.board.stub or {}).get("font") if a.board is not None else None
+        if row is None:
+            raise F4Error("no board or no CJK font row: --board and a board.toml [flash.stub] font are needed")
+        lo, hi = row
+        data = open(a.write_font, "rb").read()
+        if not data or len(data) % BLOCK or len(data) > hi - lo:
+            raise F4Error("%s is %d bytes: the font row 0x%X-0x%X holds a whole number of 4 KB sectors, up to %d"
+                          % (a.write_font, len(data), lo, hi, (hi - lo) // BLOCK))
+        log("%s: %d bytes into the font row 0x%06X-0x%06X" % (a.write_font, len(data), lo, lo + len(data)))
+        t0 = time.monotonic()
+        nw, nk = radio.spi_write(data, lo, progress=lambda i, n: log("font sector %d of %d" % (i, n)))
+        log("%s: %d sector(s) written, %d unchanged, verified by CRC, %.0f s" % (a.write_font, nw, nk, time.monotonic() - t0))
     if a.secreg or a.write_secreg:
         def locks(sr2):
             return "status register 2 = 0x%02X, %s" % (sr2, ", ".join(

@@ -144,6 +144,11 @@ key_prefix = "00AA8989"
 id = 5
 tested = false
 spi = { bus = 1, mode = 0, hz = 4500000 }
+# The CJK glyph bitmaps (CONFIG_CJK_FONT_IN_FLASH): the first megabyte after the satellite area, blank in every dump.
+# 0x17000 is 92 KB, the GB2312 level 1 face at a 12 px cell (90,120 B) rounded up to whole sectors; tools/cjkfont.py
+# --out-bin writes it and `rfoundry font` burns it here
+font = 0xF40000
+font_size = 0x17000
 
 # The codec where the merge puts it (docs/spec/codec-placement.md): tables at their stock address, the code after them
 # (or at the start of sector 10 when it doesn't fit there) and the descriptor, all in sectors 10 and 11. stock lists the SHA-256 of each stock file rfoundry merges the codec
