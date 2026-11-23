@@ -59,11 +59,13 @@ zone_edit_result_t zone_list_move(zone_t *z, uint16_t pos, int dir)
 	return ZONE_EDIT_OK;
 }
 
+// A zone's name plus " 2", cut to the zone record's field (CODEPLUG_ZONE_NAME_LEN): a longer one would be cut when it
+// is written, and the " 2" would go
 void zone_copy_name(char out[CODEPLUG_NAME_LEN + 1], const char *name)
 {
 	size_t n = strlen(name);
-	if (n > CODEPLUG_NAME_LEN - 2u) {
-		n = CODEPLUG_NAME_LEN - 2u;
+	if (n > CODEPLUG_ZONE_NAME_LEN - 2u) {
+		n = CODEPLUG_ZONE_NAME_LEN - 2u;
 	}
 	memcpy(out, name, n);
 	memcpy(out + n, " 2", 3);

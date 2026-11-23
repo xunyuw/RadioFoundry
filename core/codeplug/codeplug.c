@@ -106,7 +106,7 @@ static uint32_t fl_base = DEFAULT_FLASH_BASE;
 #define ZONE_BITMAP	EE(0x8010u)
 #define ZONE_DATA	EE(0x8030u)
 #define ZONE_LAYOUT	EE(0x806Fu)	// 0x00-0x04: 80 channels per zone, else the old 16-channel layout
-#define ZONE_NAME_LEN	16u
+#define ZONE_NAME_LEN	CODEPLUG_ZONE_NAME_LEN	// the stock zone record's field; it stays 16 (codeplug.h)
 #define ZONE_RECORD_80	(ZONE_NAME_LEN + 2u * 80u)
 
 static codeplug_source_t source = CODEPLUG_NONE;

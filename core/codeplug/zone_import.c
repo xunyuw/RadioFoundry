@@ -549,18 +549,18 @@ static int find_zone(const char *name, int skip)
 // A name no other zone has: the record's, else with " 2" ... " 99"
 static void unique_name(const char *want, int skip, char out[CODEPLUG_NAME_LEN + 1])
 {
-	char base[CODEPLUG_NAME_LEN + 1];
+	char base[CODEPLUG_ZONE_NAME_LEN + 1];
 
-	strncpy(base, (want[0] != '\0') ? want : "Shared", CODEPLUG_NAME_LEN);
-	base[CODEPLUG_NAME_LEN] = '\0';
+	strncpy(base, (want[0] != '\0') ? want : "Shared", CODEPLUG_ZONE_NAME_LEN);
+	base[CODEPLUG_ZONE_NAME_LEN] = '\0';
 	strcpy(out, base);
 	for (int n = 2; n < 100 && find_zone(out, skip) >= 0; n++) {
 		char suffix[4];
 		int sl = name_number(suffix, sizeof(suffix), " ", (uint32_t)n);
 		int bl = (int)strlen(base);
 
-		if (bl + sl > CODEPLUG_NAME_LEN) {
-			bl = CODEPLUG_NAME_LEN - sl;
+		if (bl + sl > CODEPLUG_ZONE_NAME_LEN) {
+			bl = CODEPLUG_ZONE_NAME_LEN - sl;
 		}
 		while (bl > 0 && base[bl - 1] == ' ') {
 			bl--;// "Sixteen chars 2", not "Sixteen chars  2"

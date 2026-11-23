@@ -127,10 +127,8 @@ static void test_list(void)
 	char name[CODEPLUG_NAME_LEN + 1];
 	zone_copy_name(name, "Local");
 	CHECK(strcmp(name, "Local 2") == 0);
-	zone_copy_name(name, "Northeast Region");	// 16 characters: fits, with room for the " 2"
-	CHECK(strcmp(name, "Northeast Region 2") == 0);
-	zone_copy_name(name, "The Northeast Region 2");	// 22: cut to 22, then the " 2"
-	CHECK(strcmp(name, "The Northeast Region 2 2") == 0 && strlen(name) == CODEPLUG_NAME_LEN);
+	zone_copy_name(name, "Northeast Region");	// 16: cut to 14 so the " 2" fits the zone's 16-octet field
+	CHECK(strcmp(name, "Northeast Regi 2") == 0 && strlen(name) == CODEPLUG_ZONE_NAME_LEN);
 	zone_copy_name(name, "");
 	CHECK(strcmp(name, " 2") == 0);
 }
@@ -171,12 +169,15 @@ static void test_codeplug(void)
 
 	// Rename
 	CHECK(zone_edit_rename(1, "") == ZONE_EDIT_NO_NAME);
-	CHECK(zone_edit_rename(1, "Hotspot and more!") == ZONE_EDIT_OK && named(1, "Hotspot and more!"));	// 17: fits
+	// Rename. The zone's own record holds a 16-octet name whatever CODEPLUG_NAME_LEN is: the stock zone record
+	// has no room to grow (the channel record does, so channel names take 24)
+	CHECK(zone_edit_rename(1, "") == ZONE_EDIT_NO_NAME);
+	CHECK(zone_edit_rename(1, "Hotspot and more!") == ZONE_EDIT_OK && named(1, "Hotspot and more"));	// cut to 16
 	CHECK(zone_edit_rename(7, "X") == ZONE_EDIT_NO_ZONE);
 
 	// Copy: the same channels, the name with " 2"
 	CHECK(zone_edit_copy(1, &at) == ZONE_EDIT_OK && at == 2);
-	CHECK(named(2, "Hotspot and more! 2") && holds(2, (const uint16_t[]){ 21, 20, 2, 3 }, 4));
+	CHECK(named(2, "Hotspot and mo 2") && holds(2, (const uint16_t[]){ 21, 20, 2, 3 }, 4));
 	CHECK(zone_edit_copy(9, &at) == ZONE_EDIT_NO_ZONE);
 
 	// A new channel written and added in one step, after position 0

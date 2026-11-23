@@ -21,6 +21,10 @@
 // A name the codeplug holds: 24 octets, UTF-8 (codeplug-native.md 3). A Chinese name is 3 octets a character, so 24
 // holds 8 of them; a Latin name keeps its 24 characters. The native record is 64 octets, so the field fits there
 #define CODEPLUG_NAME_LEN	24
+// A zone's name field in the stock zone record, which has no room to grow: a zone name stays 16 octets even though
+// the channel record, and the native one after it, take CODEPLUG_NAME_LEN. Code that builds a zone name must cut to
+// this, or the write cuts it later and a suffix can be lost
+#define CODEPLUG_ZONE_NAME_LEN	16
 // A name field's text valid: Latin-1 and 3-byte UTF-8 mixed, no stray continuation or control byte; a 3-byte lead
 // without its continuations is a Latin-1 byte. The rule the CPS and the radio use, also exposed for tests
 // (core/codeplug/codeplug.c)
