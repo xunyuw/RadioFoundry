@@ -260,6 +260,8 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | `LANG_ZH` | ○ | ○ | ✕ | ✕ | ✕ | ○ | ○ | ✕ |
 | `CJK_GLYPHS` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | `CJK_FONT_IN_FLASH` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| `PINYIN` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
+| `PINYIN_IN_FLASH` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | `LANG_DEFAULT_ES` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ✕ |
 | `LANG_DEFAULT_IT` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ✕ |
 | `LANG_DEFAULT_FR` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |

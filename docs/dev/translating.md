@@ -202,6 +202,27 @@ image and the blob must come from the same run: the address in `cjk_font_addr` a
 and a blob from another run puts every glyph at the wrong place. Commit neither the blob nor a
 `cjk_font_data.c` built with `--out-bin` for a board that does not set `CONFIG_CJK_FONT_IN_FLASH`.
 
+### Entering Chinese on the radio
+
+With `CONFIG_PINYIN`, the text editor's `#` key cycles ABC -> 123 -> abc -> PIN. In PIN the keypad's letters are a
+reading: 2-9 type their first letter and pressing the same key again steps through its letters (so `zhuang` is
+reachable), a letter that leaves no candidate is dropped, the encoder and Up/Down walk the bar of characters and page
+past its end, OK writes the picked character into the name, and BACK drops a letter before it drops a name character.
+
+The tables come from `tools/pinyin_table.py`, which reads the readings from [pypinyin](https://github.com/mozillazg/python-pinyin)
+(MIT). It is a build-time tool: none of its code is in the firmware. It writes 400 readings and 6763 GB2312 characters,
+30 KB in all:
+
+```
+python3 tools/pinyin_table.py --out-c core/ui/pinyin_data.c --out-bin build/pinyin.bin
+rfoundry font build/pinyin.bin --board <radio> --pinyin
+```
+
+The tables do not fit the application region beside a full face, so a board that has Chinese keeps them in the data
+flash (`CONFIG_PINYIN_IN_FLASH`, written to `board.toml` `[flash.stub] pinyin`). Regenerate them after a pypinyin
+upgrade, commit `pinyin_data.c` with the change, and burn the blob again. A character the readings do not cover (a
+symbol) is entered with the plain ABC mode.
+
 ### When the source changes
 
 `python3 tools/i18n.py --sync` adds the new keys to every catalog (untranslated) and drops the ones the source no

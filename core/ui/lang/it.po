@@ -2113,6 +2113,11 @@ msgid "That's the most it can hold"
 msgstr "Non ne entrano di più"
 
 #: core/ui/ui_menus.c
+msgctxt "TEXT_TOAST_PINYIN_FULL"
+msgid "That's the longest reading"
+msgstr "È la lettura più lunga"
+
+#: core/ui/ui_menus.c
 msgctxt "LABEL_NAME"
 msgid "Name"
 msgstr "Nome"

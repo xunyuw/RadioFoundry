@@ -339,11 +339,19 @@ all: $(REGISTRY_JSON) check-cjk check-pinyin $(TARGET).bin $(if $(BOOT_STAGE),$(
 # with the tables missing or doubles them into a region that has no room, so it fails here with what to run.
 CJK_DATA := core/ui/cjk_font_data.c
 PINYIN_DATA := core/ui/pinyin_data.c
-check-cjk:
-	@if [ "$(CONFIG_CJK_FONT_IN_FLASH)" = "y" ]; then 		grep -q cjk_font_addr $(CJK_DATA) || { echo "make: $(CJK_DATA) has the glyphs in the image but CONFIG_CJK_FONT_IN_FLASH=y: build it with tools/cjkfont.py --out-bin (docs/dev/translating.md)" >&2; exit 1; }; 	elif grep -q cjk_font_addr $(CJK_DATA) 2>/dev/null; then 		echo "make: $(CJK_DATA) has no glyphs but CONFIG_CJK_FONT_IN_FLASH is off: rebuild it without --out-bin" >&2; exit 1; 	fi
-check-pinyin:
-	@if [ "$(CONFIG_PINYIN_IN_FLASH)" = "y" ]; then 		grep -q pinyin_addr $(PINYIN_DATA) 2>/dev/null || { echo "make: $(PINYIN_DATA) has the tables in the image but CONFIG_PINYIN_IN_FLASH=y: build it with tools/pinyin_table.py --out-bin" >&2; exit 1; }; 	fi
 
+check-cjk:
+	@if [ "$(CONFIG_CJK_GLYPHS)" = "y" ]; then \
+		if [ "$(CONFIG_CJK_FONT_IN_FLASH)" = "y" ]; then \
+			grep -q cjk_font_addr $(CJK_DATA) || { echo "make: $(CJK_DATA) has the glyphs in the image but CONFIG_CJK_FONT_IN_FLASH=y: build it with tools/cjkfont.py --out-bin (docs/dev/translating.md)" >&2; exit 1; }; \
+		else \
+			grep -q cjk_font_addr $(CJK_DATA) 2>/dev/null && { echo "make: $(CJK_DATA) has no glyphs but CONFIG_CJK_FONT_IN_FLASH is off: rebuild it without --out-bin" >&2; exit 1; }; \
+		fi; \
+	fi
+check-pinyin:
+	@if [ "$(CONFIG_PINYIN)" = "y" ] && [ "$(CONFIG_PINYIN_IN_FLASH)" = "y" ]; then \
+		grep -q pinyin_addr $(PINYIN_DATA) 2>/dev/null || { echo "make: $(PINYIN_DATA) has the tables in the image but CONFIG_PINYIN_IN_FLASH=y: build it with tools/pinyin_table.py --out-bin" >&2; exit 1; }; \
+	fi
 # The codec: merged into $(TARGET)_codec.bin when the radio's stock firmware is in codecs/ (codecs/README.md)
 # A board with a first stage (BOOT_STAGE) merges the codec into the install image, so the merged file starts with the stage
 codec: $(TARGET).bin $(if $(BOOT_STAGE),$(TARGET)_install.bin)
