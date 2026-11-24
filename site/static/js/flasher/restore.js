@@ -123,3 +123,22 @@ export async function rowMatches(link, row, data) {
 	const bad = await link.diff(data, row[0], MEM_SPI);
 	return bad.length === 0;
 }
+
+// The font and pinyin rows a backup holds: the rows the board names, sliced out of the bundle's SPI flash read. A
+// backup taken with "all" covers the whole chip, so the rows are in it; one taken smaller is not and yields nothing.
+// A row the bundle does not reach to the end of is left out rather than restored short.
+export function rowsFromBundle(bundle, board) {
+	const spi = bundle.parts.get("spi-flash");
+	if (!spi?.data) return [];
+	const out = [];
+	for (const [what, row] of [["font", fontRow(board)], ["pinyin", pinyinRow(board)]]) {
+		if (!row) continue;
+		const [lo, hi] = row;
+		if (spi.data.length < hi) continue;
+		const data = spi.data.subarray(lo, hi);
+		// all 0xFF is a row nothing was written to: restoring it would erase what the radio has
+		if (!data.some((b) => b !== 0xFF)) continue;
+		out.push({ what, row, data });
+	}
+	return out;
+}

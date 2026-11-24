@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fromHex, toHex, sha256, crc32, u32le, equal } from "../static/js/flasher/bytes.js";
+import { rowsFromBundle, fontRow, pinyinRow, checkRowFile } from "../static/js/flasher/restore.js";
 import * as stockfw from "../static/js/flasher/stockfw.js";
 import { makePlan, KEEP, MERGE, RESTORE, PlanError } from "../static/js/flasher/plan.js";
 import { verify, segments, ManifestError } from "../static/js/flasher/manifest.js";
@@ -1079,4 +1080,39 @@ test("the backup after a first install reads through the loader the new build of
 	assert.match(src, /const viaLoader = \(\) => !!\(loaderOffer\(\) && pick !== "codeplug"\)/);
 	const done = src.slice(src.indexOf("function doneView()"));
 	assert.match(done.slice(0, done.indexOf("backupNow(")), /afterOffer: f4Board\(\) \? await Stub\.rfoundryOffer\(link\) : null/);
+});
+
+// A backup keeps the font and pinyin rows when it read the whole chip, and the rows are cut from the board's own
+// addresses: a backup taken smaller than the rows yields nothing rather than a short restore
+test("a backup's font rows are cut from the board's rows", () => {
+	const board = { stub: { font: [0x1000, 0x2000], pinyin: [0x2000, 0x3000] } };
+	assert.deepEqual(fontRow(board), [0x1000, 0x2000]);
+	assert.deepEqual(pinyinRow(board), [0x2000, 0x3000]);
+	assert.equal(fontRow({ stub: {} }), null);
+	assert.equal(pinyinRow({}), null);
+
+	const spi = new Uint8Array(0x3000).fill(0xFF);
+	spi[0x1000] = 0x11;		// the glyph row holds something
+	spi[0x2000] = 0x22;		// and so does the pinyin row
+	const rows = rowsFromBundle({ parts: new Map([["spi-flash", { data: spi }]]) }, board);
+	assert.equal(rows.length, 2);
+	assert.equal(rows[0].what, "font");
+	assert.equal(rows[0].data.length, 0x1000);
+	assert.equal(rows[0].data[0], 0x11);
+	assert.equal(rows[1].data[0], 0x22);
+
+	// a backup that stops before the rows has none to put back
+	assert.deepEqual(rowsFromBundle({ parts: new Map([["spi-flash", { data: spi.subarray(0, 0x800) }]]) }, board), []);
+
+	// a row nothing was written to is not restored: it would erase what the radio has
+	const blank = new Uint8Array(0x3000).fill(0xFF);
+	blank[0x2000] = 0x22;
+	const only = rowsFromBundle({ parts: new Map([["spi-flash", { data: blank }]]) }, board);
+	assert.equal(only.length, 1);
+	assert.equal(only[0].what, "pinyin");
+
+	// the file a row takes must be exactly the row's size
+	assert.equal(checkRowFile([0x1000, 0x2000], 0x1000, "font"), null);
+	assert.match(checkRowFile([0x1000, 0x2000], 0x800, "font"), /holds 4096/);
+	assert.match(checkRowFile(null, 0x1000, "font"), /no font row/);
 });

@@ -31,7 +31,7 @@ import { Dfu, DfuError, NormalModeError, WebUsbTransport, checkKey, usbSupported
 import { Link, LinkError, CableError, SerialStream, RFOUNDRY_USB, RFOUNDRY_NET, CABLES, probe, whyNoAnswer, noAnswerKey, serialSupported, serialApi, browserErrorKey, noDeviceChosen, knownRadioPort } from "./link.js";
 import { readRadio, makeBundle, openBundle, bundleFolder, notBundle, bundleName, describeFirmware, CODEPLUG_SPAN } from "./backup.js";
 import { targets, planInternal, planStock, codeplugSectors, writeCodeplug, codeplugLayout,
-	fontRow, pinyinRow, checkRowFile, writeRow } from "./restore.js";
+	fontRow, pinyinRow, checkRowFile, writeRow, rowsFromBundle } from "./restore.js";
 import { Selection } from "./select.js";
 import { codecPresent, decideCodec, DecisionError } from "./decide.js";
 import { tooBig } from "./buildfit.js";
@@ -3025,6 +3025,28 @@ function afterRestore() {
 			const refused = await writeCodeplug(link, sectors, (d, n) => prog.set(d, n, t("flash.restore.writing_codeplug")));
 			status.append(notice(refused.length ? t("flash.restore.codeplug_refused", { n: refused.length, total: sectors.length })
 				: t("flash.restore.codeplug_done", { n: sectors.length }), refused.length ? "" : "ok"));
+			// The font and pinyin rows a backup with the whole chip holds go back too: the codeplug areas stop at
+			// 0x120000 and the rows sit far above them
+			const rows = rowsFromBundle(S.bundle, S.board);
+			if (rows.length) {
+				try {
+					await dropSerial();
+					const again = await connectSerial();
+					const stub = new F4Stub(again.s, { log: () => {}, reopen: reopenRFoundryPort, board: f4Board() });
+					S.link = null;
+					const json = await f4StubJson();
+					await stub.enterFromRFoundry(f4Image(json), (d, n) => prog.set(d, n, t("flash.font.entering")), { entry: json.run });
+					for (const x of rows) {
+						const r = await writeRow(stub, x.row, x.data, (d, n) =>
+							prog.set(d, n, t("flash.font.writing", { what: t(x.what === "pinyin" ? "flash.font.pinyin" : "flash.font.glyphs") })));
+						diag.note("restore: font row", { what: x.what, ...r });
+					}
+				} catch (e) {
+					// the codeplug is back already: say what did not go, do not fail the whole restore for it
+					diag.error("restore/font", e);
+					status.append(notice(t("flash.font.err", { why: errorText(e) }), "bad"));
+				}
+			}
 			S.forward(button(t("flash.nav.finish"), () => reset(), { primary: true }));
 		} catch (e) {
 			status.append(connectError(e), serialHelp());
