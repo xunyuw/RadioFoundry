@@ -6586,7 +6586,7 @@ static void test_factory_reset(void)
 	CHECK(settings_flush());
 	n_ev = 0;
 	CHECK(ui_svc_factory_reset());
-	sim_flash_cut_after(484);	// the settings records (page 1: 216 + 12 + 4 bytes, page 0: 236 + 12 + 4) go in, the native erase fails
+	sim_flash_cut_after(492);	// the settings records (page 1: 12 + 216 + 4, page 0: 12 + 236 + 4, and the journal's) go in, the native erase fails
 	storage_job_poll();
 	sim_flash_power_on();
 	CHECK(n_ev == 1 && strstr(tr_en(last_ev.why), "native") != NULL);

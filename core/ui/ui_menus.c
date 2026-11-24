@@ -1321,11 +1321,11 @@ static bool ced_is_nxdn(const channel_t *ch)
 // the record says DMR, receive only, but the radio core runs the kind's mode and takes transmit allowed from the tag.
 // None of the record's DMR fields (contact, color code, slot, group list, ID) or FM fields (width, tones, which the
 // mode sets itself) are its own, so the editor neither shows nor checks them. P25, NXDN and the trunked kinds use the
-// record's contact and ID, so they are not among these
+// record's contact and ID, so they are not among these; AES is DMR's own with a key, so neither is it
 static bool ced_own_mode(const channel_t *ch)
 {
 	return ch->kind != CODEPLUG_KIND_NONE && ch->kind != CODEPLUG_KIND_P25 && ch->kind != CODEPLUG_KIND_NXDN &&
-	       !codeplug_kind_trunked(ch->kind);
+	       ch->kind != CODEPLUG_KIND_DMR_AES && !codeplug_kind_trunked(ch->kind);
 }
 #endif
 

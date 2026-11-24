@@ -61,7 +61,7 @@ static channel_t make(const char *name, uint32_t rx, uint32_t tx)
 // The registry, whichever way the switch is: the row is there, built follows CONFIG_YSF
 static void test_registry(void)
 {
-	CHECK(CODEPLUG_KIND_YSF == 6);
+	CHECK(CODEPLUG_KIND_YSF == 7);	// after AES-256 (5) and D-STAR (6)
 	CHECK(strcmp(codeplug_kind_name(CODEPLUG_KIND_YSF), "YSF") == 0);
 	CHECK(codeplug_kind_built(CODEPLUG_KIND_YSF) == (CONFIG_YSF != 0));
 	CHECK(!codeplug_systype_built(CODEPLUG_KIND_YSF) && strcmp(codeplug_systype_name(CODEPLUG_KIND_YSF), "?") == 0);

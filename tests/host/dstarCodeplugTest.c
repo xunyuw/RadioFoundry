@@ -61,7 +61,7 @@ static channel_t make(const char *name, uint32_t rx, uint32_t tx)
 // The registry, whichever way the switch is: the row is there, built follows CONFIG_DSTAR
 static void test_registry(void)
 {
-	CHECK(CODEPLUG_KIND_DSTAR == 5);
+	CHECK(CODEPLUG_KIND_DSTAR == 6);	// after upstream's AES-256 (5)
 	CHECK(strcmp(codeplug_kind_name(CODEPLUG_KIND_DSTAR), "DV") == 0);
 	CHECK(codeplug_kind_built(CODEPLUG_KIND_DSTAR) == (CONFIG_DSTAR != 0));
 	CHECK(!codeplug_systype_built(CODEPLUG_KIND_DSTAR) && strcmp(codeplug_systype_name(CODEPLUG_KIND_DSTAR), "?") == 0);
