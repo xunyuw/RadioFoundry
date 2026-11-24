@@ -2016,6 +2016,14 @@ YSFFR   := $(CORE)/ysf/ysf_fec.c $(CORE)/ysf/ysf_frame.c $(CORE)/ysf/ysf_vw.c
 ysfTest: ysfTest.c $(YSFFR) $(wildcard $(CORE)/ysf/*.h) ../vectors/ysf.txt
 	$(CC) $(CFLAGS) -I. -Wshadow -o $@ ysfTest.c $(YSFFR)
 
+# Fusion's air mode (docs/spec/ysf-modem.md 1.7): the profile an HR_C6000's FM copy receives through, against that
+# chip's fit rules, and the sync's bytes against YSF_SYNC
+TESTS   += ysfAirTest
+YSFAIR  := $(YSFFR) $(CORE)/ysf/ysf_air.c $(CORE)/air/air_framer.c
+
+ysfAirTest: ysfAirTest.c $(YSFAIR) $(wildcard $(CORE)/ysf/*.h) $(wildcard $(CORE)/air/*.h)
+	$(CC) $(CFLAGS) -I. -Wshadow -o $@ ysfAirTest.c $(YSFAIR)
+
 # The C4FM modem on a simulated radio link (noise, offset, drift, clock error, levels, high-pass) and the engine
 TESTS   += ysfModemTest
 YSFMD   := $(YSFFR) $(CORE)/ysf/ysf_c4fm.c $(CORE)/ysf/ysf_engine.c
@@ -2024,9 +2032,10 @@ ysfModemTest: ysfModemTest.c $(YSFMD) $(wildcard $(CORE)/ysf/*.h)
 	$(CC) $(CFLAGS) -I. -Wshadow -o $@ ysfModemTest.c $(YSFMD) -lm
 
 run: run-ysf
-run-ysf: ysfTest ysfModemTest
+run-ysf: ysfTest ysfModemTest ysfAirTest
 	./ysfTest
 	./ysfModemTest
+	./ysfAirTest
 ifneq ($(PYTHON),)
 	$(PYTHON) -B $(ROOT)/tools/ysf_ref.py --self-test
 	@$(PYTHON) -B $(ROOT)/tools/ysf_ref.py vectors | cmp -s - ../vectors/ysf.txt || \

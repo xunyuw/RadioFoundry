@@ -152,6 +152,40 @@ The DT1 data is the one difference left: its meaning isn't public, and the stand
 receiver must handle anyway. The receiver keeps FN 6 out of the callsign fields, also when it has to assume that
 frame's number after a lost FICH (from the FT the frames carry, 3.6).
 
+### 1.7 On an HR_C6000 through its FM copy
+
+The HR_C6000 boards (the 160 px class among them) have neither of 1.2's routes: their `audio_tap` carries DMR voice
+and de-emphasized FM receive, no flat transmit and no raw discriminator, and their modem's correlator takes only a
+24-symbol all-outer sync, which Fusion's 20-symbol one is not (7 of its 20 symbols are inner). The route they do have
+is [modem-hrc6000.md](modem-hrc6000.md) 10.6: the chip's FM receive RAM holds the unfiltered discriminator at 8 kHz,
+and the core's soft modem (`core/air/air_softmodem.c`) demodulates it. That path is what P25 and NXDN receive on, is
+checked on air on a radio of the family, and is already the board's `air_tap`.
+
+What it needs of Fusion is an `air_mode_t` (hal_air.h, air_framer.h):
+
+| Field | Value | Why |
+|---|---|---|
+| `sym_rate` | 4800 | 3.1: 480 symbols a frame, 100 ms |
+| `levels`, `shape`, `shape_param` | 4, `AIR_SHAPE_C4FM`, 20 | Y 3.2 table 3-1; the chip's pulse is close enough that `AIR_FIT_SHAPE_APPROX` is taken |
+| `dev_outer_hz` | 1800 | the wide setting 1.6 measured on a Yaesu radio (0.91 of 2700 on its own scale); inside the copy's 1700-2900 Hz range for receive, and inside the transmit pair's 1050-2400 Hz |
+| `bw` | `RADIO_BW_25K` | 1.3 |
+| `sync_every_syms` | 480 | the frame sync opens every frame |
+| `nsyncs` | 1 | the 40-bit `YSF_SYNC`, `max_errs` 3 searching / 8 tracking (3.6) |
+| `idle` | the frame the transmitter sends when the queue runs dry (3.5) | |
+
+Receive takes `AIR_FIT_SOFT` from the copy only: `air_softmodem_rx_fit` asks for 8 kHz, one channel, a band up to
+2640 Hz (11/20 of 4800) and down to 48 Hz (4 levels, 4800/100); the copy reports 0-3400 Hz, all of them. The
+correlator is not asked for a fit, because `rx_sync()` finds no 24-symbol all-outer pattern in `YSF_SYNC`.
+
+Transmit goes through the chip's physical layer (10.3) like P25's: `ysf_engine_tx_block` already emits 144-symbol
+blocks, and `hrc6000_air_*` sends them with the pair scaled to `dev_outer_hz / 0.946` (10.3: the chip's pulse is
+DMR's, so a C4FM receiver reads 0.946 of the level the target names). `AIR_FIT_RATE_DOUBLED` does not apply: 4800 is
+the chip's own rate.
+
+The one thing the copy lacks is a known level per kHz (`rx_counts_per_khz` 0, 10.6): the soft modem takes the outer
+level from each sync, as it does for NXDN, so Fusion's absolute deviation matters only for what a receiver hears, not
+for what this radio decodes.
+
 ## 2. The modem
 
 ### 2.1 Parameters

@@ -22,6 +22,10 @@
 #if CONFIG_YSF
 #include "ysf/ysf_engine.h"
 #include "radio/radio_ysf_vw.h"
+#if CONFIG_YSF_AIR
+#include "air/air_framer.h"
+#include "air/air_softmodem.h"
+#endif
 #endif
 #include "codeplug/codeplug.h"
 #include "hal_audio.h"
@@ -147,6 +151,14 @@ typedef struct {
 	ysf_engine_t eng;
 #if RADIO_YSF_VW_IN_AREA
 	radio_ysf_vw_mem_t vw;
+#endif
+#if CONFIG_YSF_AIR
+	// The chip's air interface route (ysf-modem.md 1.7): the framer that slices the frame out of the symbols, the
+	// soft modem that turns the chip's FM copy into them, and the two buffers both work in
+	air_framer_t air_fr;
+	air_softmodem_t air_sm;
+	uint8_t air_hard[YSF_PHY_BLOCK_BYTES * 4u];
+	int8_t air_soft[YSF_PHY_BLOCK_SYMS * 4u];
 #endif
 } radio_ysf_area_t;
 #endif

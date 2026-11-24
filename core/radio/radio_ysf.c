@@ -15,6 +15,11 @@
 #include "codeplug/codeplug_modes.h"
 #include "ysf/ysf_engine.h"
 #include "ysf/ysf_codeplug.h"
+#if CONFIG_YSF_AIR
+#include "ysf/ysf_air.h"
+#include "air/air_framer.h"
+#include "air/air_softmodem.h"
+#endif
 #include "dmr/ambe/ambeFec.h"
 #if CONFIG_YSF_VW
 #include "hal_time.h"
@@ -419,8 +424,8 @@ static void tx_block(const int16_t *mic)
 		return;
 	}
 	uint8_t bits[YSF_VOICE_BITS];
-	bool first = !cb_tx;
 #if CONFIG_YSF_VW
+	bool first = !cb_tx;
 	if (tx_vw()) {
 		// Voice FR: the full-rate encoder on the CPU, whatever the board's vocoder; its silence frame is a constant
 		if (vw_take() || first) {
@@ -707,6 +712,31 @@ static bool path_ok(void)
 	       tap->fm_rx_flat_read != NULL && tap->fm_rx_flat_stop != NULL && tap->fm_tx_inject != NULL;
 }
 
+#if CONFIG_YSF_AIR
+// The second route to C4FM, for a board with neither flat tap (ysf-modem.md 1.7): the modem chip's air interface, its
+// FM copy into the core's soft modem. The provider must carry this profile both ways, which is what the fit answers
+static bool air_ok(void)
+{
+	const hal_air_t *air = board.air;
+
+	return air != NULL && air->fit != NULL && air->open != NULL && air->rx_restart != NULL
+	       && air->tx_begin != NULL && air->tx_queue != NULL && air->tx_end != NULL
+	       && (air->fit(&ysf_air_mode.profile) & (AIR_FIT_RX | AIR_FIT_TX)) == (AIR_FIT_RX | AIR_FIT_TX);
+}
+#endif
+
+// Which route this build and board run: the flat tap where it has one (dm32), else the chip's air interface
+static bool use_air;
+
+static void route_pick(void)
+{
+#if CONFIG_YSF_AIR
+	use_air = !path_ok() && air_ok();
+#else
+	use_air = false;
+#endif
+}
+
 static void rx_flat_on(void)
 {
 	if (rx_on) {
@@ -728,6 +758,61 @@ static void rx_flat_off(void)
 	}
 }
 
+#if CONFIG_YSF_AIR
+// --- the chip's air interface (ysf-modem.md 1.7) ---
+
+static bool air_on;
+
+static void air_dibits(void *ctx, const uint8_t *d, uint16_t n)
+{
+	(void)ctx;
+	ysf_engine_rx_dibits(eng, d, n);	// the frame layer's own search and FICH check do the rest
+}
+
+static void air_lost(void *ctx)
+{
+	(void)ctx;	// the frame layer closes the squelch on its own lost sync
+}
+
+static void air_event(const air_event_t *ev, void *ctx)
+{
+	(void)ctx;
+	if (ev->kind == AIR_EV_RX && ev->chunk != NULL) {
+		// A chip provider hands its records; a copy provider hands the copy's samples already turned into symbols
+		air_framer_rx(&area->air_fr, ev->chunk);
+	}
+}
+
+static bool air_start(void)
+{
+	const hal_air_t *air = board.air;
+
+	if (air_on) {
+		return true;
+	}
+	if (!use_air || air == NULL || area == NULL) {
+		return false;
+	}
+	static const ysf_air_rx_t arx = { air_dibits, air_lost, NULL };
+	air_framer_init(&area->air_fr, &ysf_air_mode, (void *)&arx, area->air_hard, area->air_soft,
+			YSF_PHY_BLOCK_SYMS * 4u);
+	if (!air->open(&ysf_air_mode.profile, air_event, NULL)) {
+		view.fault = RYSF_RX_REFUSED;
+		return false;
+	}
+	air_on = true;
+	return true;
+}
+
+static void air_stop(void)
+{
+	if (air_on) {
+		board.air->close();
+		air_on = false;
+	}
+}
+#endif
+
 static void rx_queue_reset(void)
 {
 	STORE(rx_tail, LOAD(rx_head));
@@ -748,10 +833,11 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 	view.fault = RYSF_OK;
 	view.codec = codec_ok();
 	tap = board.audio_tap;
+	route_pick();
 	cal_load();
 	station_load();
 	running = true;
-	if (!path_ok()) {
+	if (!path_ok() && !use_air) {
 		view.fault = RYSF_NO_PATH;
 		view_dirty = true;
 		return false;
@@ -765,7 +851,7 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 		view_dirty = true;
 		return false;
 	}
-	if (path.tx_amp == 0) {
+	if (!use_air && path.tx_amp == 0) {
 		view.fault = RYSF_NO_CAL;	// receive still runs: only transmit needs the scale
 	}
 #if RADIO_YSF_VW_IN_AREA
@@ -773,10 +859,29 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 #endif
 	rx_queue_reset();
 	engine_rx();
-	rx_flat_on();
+#if CONFIG_YSF_AIR
+	if (use_air) {
+		if (!air_start()) {
+			air_stop();
+			stream_stop();
+			rx_fold();
+			running = false;
+			view.on = false;
+			view_dirty = true;
+			return false;
+		}
+	} else
+#endif
+	{
+		rx_flat_on();
+	}
 	stream_start();
 	view_dirty = true;
-	return rx_on;
+	return rx_on
+#if CONFIG_YSF_AIR
+	       || air_on
+#endif
+	       ;
 }
 
 void radio_ysf_stop(void)
@@ -787,6 +892,9 @@ void radio_ysf_stop(void)
 	if (tx_on) {
 		radio_ysf_tx_abort();
 	}
+#if CONFIG_YSF_AIR
+	air_stop();
+#endif
 	rx_flat_off();
 	stream_stop();
 	rx_fold();

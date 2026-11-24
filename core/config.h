@@ -154,6 +154,12 @@
 #ifndef CONFIG_YSF_VW
 #define CONFIG_YSF_VW			CONFIG_YSF
 #endif
+// Fusion through the modem chip's air interface (core/ysf/ysf_air.c, docs/spec/ysf-modem.md 1.7): for a board with
+// neither flat FM path. Off here: only a board whose glue runs it turns it on, and the tests that link radio_ysf.c
+// without it get the flat path's behavior alone
+#ifndef CONFIG_YSF_AIR
+#define CONFIG_YSF_AIR			0
+#endif
 // The flat FM paths' board glue (hal_audio_tap.h), shared by the data modems with a waveform of their own
 #ifndef CONFIG_FM_FLAT
 #define CONFIG_FM_FLAT			(CONFIG_DSTAR || CONFIG_YSF)
