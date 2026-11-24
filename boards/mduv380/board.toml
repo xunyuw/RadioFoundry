@@ -53,7 +53,7 @@ values = [
 [ci]
 extra = [
 	{ name = "chinese", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
-	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n"] },
+	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n", "LTO=1"] },
 ]
 
 [flash]
