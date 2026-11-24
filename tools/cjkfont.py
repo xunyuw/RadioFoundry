@@ -374,6 +374,10 @@ def main():
             for row in rows:
                 f.write("\t" + ", ".join("0x%02X" % b for b in row) + ",\n")
         f.write("};\n")
+        # The same kinds of value the data flash shape declares, so a build with CONFIG_CJK_FONT_IN_FLASH off still
+        # has them: the debug link reports the table's identity whatever shape the build has
+        f.write("const uint32_t cjk_font_addr = 0;\n")
+        f.write("const uint32_t cjk_font_index_hash = 0x%08Xu;\n" % index_hash(flash))
         f.write("#endif\n")
         f.write("#endif\n")
 
