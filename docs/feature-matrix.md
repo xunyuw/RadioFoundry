@@ -302,6 +302,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | `DSTAR` | ○ | … | … | … | … | … | … | … |
 | `YSF` | ○ | … | … | … | … | … | … | … |
 | `YSF_VW` | ○ | … | … | … | … | … | … | … |
+| `YSF_AIR` | ○ | … | … | … | … | … | … | … |
 | `APRS` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `APRS_AFSK` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `APRS_DMR` | ● | ● | ● | ● | ● | ● | ● | ● |
@@ -345,6 +346,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | D-STAR digital voice: GMSK modem, headers, slow data, clean-room AMBE codec | `DSTAR` | — | — | DM-32UV only (flat FM path); on in the multimode variant. Ported, not yet checked on a radio in this tree ([dstar-modem.md](spec/dstar-modem.md), [dstar-codec.md](spec/dstar-codec.md)). The codec borrows the DMR vocoder's RAM |
 | Yaesu System Fusion (C4FM): FICH, callsign data, DN voice with the radio's own codec | `YSF` | — | — | DM-32UV only (flat FM path); on in the multimode variant. Ported, not yet checked on a radio in this tree ([ysf-modem.md](spec/ysf-modem.md)) |
 | Fusion Voice FR (VW): the full-rate frame and layout, played and sent through core/mbe's codec | `YSF_VW` | — | — | With `YSF`; its codec state shares the mode area with D-STAR's. Ported, not yet checked on a radio in this tree ([ysf-modem.md](spec/ysf-modem.md) 4.1) |
+| Fusion through a modem chip's air interface: the board's FM copy into the core's soft modem, for a radio with no flat FM tap | `YSF_AIR` | — | — | With `YSF`, on a board whose `hal_air` provider carries the profile both ways. Written for the HR_C6000 radios; host tested, not yet checked on a radio ([ysf-modem.md](spec/ysf-modem.md) 1.7) |
 | Basic privacy (Motorola / Anytone BP) | `DMR_PRIVACY` | 1,936 | 1,992 |  |
 | AES-256 DMR voice, PI header and late-entry signaling | `DMR_AES` | 3,992 | — | Requires `DMR_PRIVACY`. DM-1701: 3,992 B flash and 480 B RAM with `DMR_AES` on versus off. TX to a receiver of another make needs the modem driver's burst F field (`set_burst_f`, [dmr-voice.md](spec/dmr-voice.md) 5.1): only the HR_C7000 driver has it (DM-32UV); on the HR_C6000 and other radios our AES overs reach radios running RadioFoundry only (#864). |
 | Talker alias receive and send | `DMR_TALKER_ALIAS` | 984 | 1,300 |  |
