@@ -553,6 +553,11 @@ switch = "CJK_GLYPHS"
 spec = "docs/spec/ui.md"
 source = ["core/ui/cjk_font.c", "core/ui/cjk_font_data.c"]
 
+[feature.cjk_font_in_flash]
+switch = "CJK_FONT_IN_FLASH"
+spec = "docs/dev/translating.md"
+source = ["core/ui/cjk_font.c", "core/ui/cjk_font_data.c"]
+
 [feature.pinyin]
 switch = "PINYIN"
 spec = "docs/dev/translating.md"
