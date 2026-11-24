@@ -17,7 +17,7 @@
 #include "board.h"
 #include "storage/storage.h"
 
-#ifdef CJK_FONT_IN_FLASH
+#if CONFIG_CJK_GLYPHS && CONFIG_CJK_FONT_IN_FLASH
 // One glyph from the data flash, with its bus shared as every other reader takes it (core/satellite/store.c)
 static bool font_read(uint32_t addr, void *buf, uint32_t len)
 {

@@ -14,6 +14,7 @@
 #include "ui/ui_app.h"
 #include "ui/ui_screens.h"
 #include "ui/gfx.h"
+#include "codeplug/codeplug.h"	// CODEPLUG_NAME_LEN: the count the text screen shows
 #include "ui/i18n.h"
 #include "ui/gfx.h"
 #include "config.h"
@@ -40,6 +41,10 @@ typedef struct {
 	int budget;
 	bool writes;		// the flow saves on purpose (else: zero codeplug writes)
 } flow_t;
+
+#define STRINGIFY(x)		#x
+#define XSTRINGIFY(x)		STRINGIFY(x)
+#define NAME_COUNT		XSTRINGIFY(CODEPLUG_NAME_LEN)
 
 #define CALLER	"call:9991234,91,g wait:11000 "
 // 143 characters (UI_MSG_TEXT_MAX), the last word LAST
@@ -589,7 +594,7 @@ static const flow_t flows[] = {
 	{ "21 keep editing", "ok 5 ok down down down down down down down down ok back", "ok", "screen=channel", 1, false },
 	{ "21 discard goes back to Channels", "ok 5 ok down down down down down down down down ok back", "down ok", "screen=channels", 2, false },
 	{ "21 the name opens text entry", "ok 5 ok", "ok", "screen=text", 1, false },
-	{ "21 text entry counts the characters", "ok 5 ok", "ok", "screen=text shows=10/16 hides=010", 1, false },
+	{ "21 text entry counts the characters", "ok 5 ok", "ok", "screen=text shows=10/" NAME_COUNT " hides=010", 1, false },
 	{ "21 a long message wraps", "5 6 3 ctx 3 down down down down ok ctx",
 	  "1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1",
 	  "screen=message-text shows=31/143 hides=1234567890123456789012345678901", 31, false },
