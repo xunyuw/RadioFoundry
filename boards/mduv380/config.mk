@@ -39,3 +39,6 @@ BOARD_UNSUPPORTED += FAULT_TRACE	# needs a host UART: the host port is USB, and 
 # them in the data flash at 0xF40000 and 0xF6C000 (below) and `rfoundry font` writes them there. Off by default like
 # Chinese on every radio: the `chinese` CI extra builds it, and a radio without the blob burned in draws boxes
 CONFIG_CJK_CELL ?= 12
+BOARD_NOT_WRITTEN += DSTAR	# no flat FM paths in board.audio_tap (docs/spec/dstar-modem.md 1.1)
+BOARD_NOT_WRITTEN += YSF	# the same flat FM paths Fusion runs on (docs/spec/ysf-modem.md 1.1)
+BOARD_NOT_WRITTEN += YSF_VW	# Voice FR rides on Fusion, not written here either

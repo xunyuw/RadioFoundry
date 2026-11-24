@@ -50,7 +50,8 @@
 #define START_TASK_PRIORITY	5
 // words: the radio core's set-up runs here at boot (radio_sm_init, 584 bytes of frame on an HR_C7000 radio, then the APRS
 // identity load or a DMR VFO's contact search down to the flash driver); 512 left that radio 88 bytes and 640 came 16
-// short once the hotspot and AES code grew (make stack-check, the maximal configuration of a 128x64 board)
+// short once the hotspot, AES and D-STAR code grew (make stack-check, the maximal configuration of a 128x64 board).
+// 672: radio_sm_init keeps a settings_t on this stack, and D-STAR's 40 bytes took the STM32F4 radios' frame to 616
 #define START_TASK_STACK	672
 #define HOUSEKEEPING_MS		100
 #define POWER_OFF_TX_MS		200	// after the PTT release, before the latch drops
