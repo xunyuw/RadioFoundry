@@ -15,9 +15,10 @@ CONFIG_APRS_IGATE ?= n
 MAXIMAL_VARS := LTO=1
 # Left out of tools/ci.sh's maximal configuration: PPP stands in for the USB network adapter on UART-only radios
 # (docs/spec/ppp.md), and this one has the adapter; the APRS iGate is off by default (above); French, off by default,
-# so that the maximal build keeps satellite tracking and still fits the app region. Chinese is in the maximal build:
-# its face and the pinyin tables live in the data flash (below), not the app region
-MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR
+# so that the maximal build keeps satellite tracking and still fits the app region; Chinese too, whose code point index
+# and pinyin search fill the app region beside every other switch (36 KB over). The `chinese` extra builds it instead,
+# without satellite tracking (board.toml). Only its bitmaps live in the data flash (below), not its index or text
+MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR LANG_ZH LANG_DEFAULT_ZH
 
 # What the radio's hardware can't do, one switch per line with the reason (tools/boards.py checks there is one;
 # docs/build-config.md, "Unsupported, not written, unconfirmed"): ci's maximal configuration leaves these off
