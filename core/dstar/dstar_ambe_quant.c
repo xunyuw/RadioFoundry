@@ -38,6 +38,7 @@
 #include "dstar/dstar_ambe_quant.h"
 
 #include <stddef.h>
+#include <string.h>
 
 _Static_assert((-1 >> 1) == -1, "arithmetic right shift required");
 
@@ -61,10 +62,11 @@ static int32_t rdiv(int32_t n, int32_t d)
 
 void dstar_ambe_init(dstar_ambe_state_t *s)
 {
-	s->gamma_q16 = 0;
+	// The whole struct, its padding included: the encoder keeps its own copy of the decoder's state and the host test
+	// compares the two with memcmp, so a padding byte nobody wrote would read as a difference (and is an
+	// uninitialized read on its own)
+	memset(s, 0, sizeof(*s));
 	s->L = 30;
-	for (unsigned l = 0; l <= DSTAR_AMBE_MAX_L; ++l)
-		s->log2_amp[l] = 0;
 }
 
 // Previous frame's log magnitude at harmonic idx. mbelib copies log2M[1] to [0] and, when L grows, repeats
