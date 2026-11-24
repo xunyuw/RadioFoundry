@@ -10,6 +10,9 @@
 #include "input/input.h"
 #include "ui/ui.h"
 #include "ui/i18n.h"
+#if CONFIG_CJK_GLYPHS
+#include "ui/cjk_font.h"	// cjk_font_count, and the index's hash for a build with the glyphs in the data flash
+#endif
 #include "codeplug/codeplug.h"
 #include "codeplug/zone_edit.h"
 #include "settings/settings.h"
@@ -165,6 +168,18 @@ static void core_section(const radio_view_t *v, dl_text_t *t)
 	dl_text(t, "req_handled=%u\nreq_dropped=%u\nch_read_errors=%u\n", (unsigned)handled, (unsigned)dropped,
 		(unsigned)codeplug_channel_errors());
 	dl_text(t, "serial=%u\n", (unsigned)radio_view_serial());
+#if CONFIG_CJK_GLYPHS
+	// Which CJK table this build was made with, and where its glyphs are. A tool compares the index's hash with the one
+	// the font it is about to write was built with, so a firmware and a data flash from different runs are told apart
+	// instead of drawing the wrong glyph for a character
+	dl_text(t, "font.glyphs=%u\n", (unsigned)cjk_font_count);
+#if CONFIG_CJK_FONT_IN_FLASH
+	dl_text(t, "font.in_flash=1\nfont.addr=0x%X\nfont.index_hash=0x%08X\n",
+		(unsigned)cjk_font_addr, (unsigned)cjk_font_index_hash);
+#else
+	dl_text(t, "font.in_flash=0\n");
+#endif
+#endif
 }
 
 static void channel_section(const radio_view_t *v, dl_text_t *t)

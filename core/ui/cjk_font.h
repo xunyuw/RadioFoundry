@@ -34,4 +34,15 @@
 // The pointer is valid until the next call when the glyphs come from the data flash
 const uint8_t *cjk_font_glyph(uint32_t cp);
 
+#if CONFIG_CJK_GLYPHS
+// How many characters the table has, and for a build that reads its glyphs from the data flash, where they are and the
+// index's FNV-1a. A tool compares the hash with the one the font it writes was built from, so a firmware and a flash
+// from different runs are told apart (core/debuglink/debuglink_view.c reports them)
+extern const uint16_t cjk_font_count;
+#if CONFIG_CJK_FONT_IN_FLASH
+extern const uint32_t cjk_font_addr;
+extern const uint32_t cjk_font_index_hash;
+#endif
+#endif
+
 #endif

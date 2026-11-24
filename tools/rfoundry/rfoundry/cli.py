@@ -1289,6 +1289,35 @@ def cmd_font(args):
         raise UsageError("%s is %d bytes but the %s region holds %d: --check compares the whole row, so give the file "
                          "that was burned there" % (args.image, size, what, hi - lo))
     say("%-8s %s: %d bytes into 0x%06X-0x%06X, %d sectors" % (what, b.name, size, lo, lo + size, size // block))
+    # The file's own record says which index it was built for (tools/cjkfont.py writes it beside the blob). A radio
+    # whose firmware reports a different index would draw the wrong glyph for a character, so check before writing.
+    # A radio that does not answer (off, in its bootloader) is not refused: the stub route asks it again anyway
+    if not args.pinyin:
+        meta = args.image + ".json"
+        if os.path.exists(meta):
+            try:
+                with open(meta, encoding="utf-8") as fm:
+                    want = json.load(fm)
+            except (OSError, ValueError) as e:
+                raise UsageError("%s: %s" % (meta, e))
+            table = None
+            try:
+                if args.port:
+                    table = debuglink.Link(args.port).font_table()
+                else:
+                    p = debuglink.probe(log=None)
+                    table = None if p is None else debuglink.Link(p["port"]).font_table()
+            except Exception:
+                table = None		# no radio, or one that does not report its table: nothing to compare
+            if table and table.get("glyphs") != want.get("glyphs"):
+                raise UsageError(
+                    "the radio's firmware was built for %s characters and %s for %s: they come from one run of "
+                    "tools/cjkfont.py, so flash the firmware that matches this font"
+                    % (table.get("glyphs"), args.image, want.get("glyphs")))
+            if table and table.get("in_flash") and table.get("index_hash") != int(want["index_hash"], 0):
+                raise UsageError(
+                    "the radio's index hash is 0x%08X and %s was built with %s: flash the firmware that matches it"
+                    % (table["index_hash"], args.image, want["index_hash"]))
     import stubtool
     # The row's address is the board's and the stub tools take it from the same record, so no range is passed here: one
     # number in two places is one that can disagree

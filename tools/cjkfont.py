@@ -34,6 +34,7 @@ character is regenerated from the same font and not from memory (docs/dev/transl
 """
 import argparse
 import hashlib
+import json
 import os
 import re
 import sys
@@ -200,6 +201,15 @@ def license_lines(path):
     return lines
 
 
+def index_hash(glyphs):
+    """FNV-1a over the code points in order: the value the firmware's cjk_font_index_hash must have for this table."""
+    h = 2166136261
+    for cp, _, _ in glyphs:
+        h = ((h ^ (cp & 0xFF)) * 16777619) & 0xFFFFFFFF
+        h = ((h ^ (cp >> 8)) * 16777619) & 0xFFFFFFFF
+    return h
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build the firmware's CJK glyph table (docs/dev/translating.md)")
     ap.add_argument("--font", required=True, help="an outline font whose license allows embedding bitmaps")
@@ -301,6 +311,13 @@ def main():
         with open(args.out_bin, "wb") as fb:
             fb.write(blob)
             fb.write(b"\xff" * pad)
+        # A small record beside the blob: what the firmware's cjk_font_index_hash must say for these bytes to be the
+        # ones it expects. A tool compares them before writing, so a firmware and a font from different runs are caught
+        meta = {"glyphs": len(glyphs), "cell": CELL, "bytes": len(blob) + pad,
+                "index_hash": "0x%08X" % index_hash(glyphs)}
+        with open(args.out_bin + ".json", "w", encoding="utf-8", newline="\n") as fj:
+            json.dump(meta, fj, indent=1, sort_keys=True)
+            fj.write("\n")
         print("cjkfont: %s holds %d glyphs, %d bytes of glyphs, %d bytes padded to whole 4 KB sectors"
               % (args.out_bin, len(glyphs), len(blob), len(blob) + pad))
 
@@ -340,6 +357,9 @@ def main():
         f.write("};\n\n")
         f.write("const uint16_t cjk_font_count = %d;\n\n" % len(glyphs))
         f.write("const uint32_t cjk_font_addr = CONFIG_CJK_FONT_ADDR;\n")
+        # The index's own FNV-1a: a radio says which table it was built with, and a tool can tell whether the bytes in
+        # the data flash are the ones this index reads (the glyph at slot i must be cjk_font_cp[i])
+        f.write("const uint32_t cjk_font_index_hash = 0x%08Xu;\n" % index_hash(glyphs))
         f.write("#else\n")
         flash = flash_glyphs if flash_glyphs else glyphs
         f.write("// The glyphs are in this image: the characters the catalogs and the names list use\n")
