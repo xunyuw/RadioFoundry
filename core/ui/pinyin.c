@@ -134,6 +134,64 @@ uint16_t pinyin_candidates(const char *prefix, uint16_t from, uint16_t *out, uin
 	return n;
 }
 
+// The digits a letter sits on, a phone keypad's (the editor's pinyin_keys): 'a' - 'z' -> 2..9
+static uint8_t letter_digit(char c)
+{
+	static const char rows[] = "22233344455566677778889999";
+	if (c < 'a' || c > 'z')
+		return 0;
+	return (uint8_t)(rows[c - 'a'] - '0');
+}
+
+// Whether a reading's first `n` letters sit on these digits: T9, where a key means any of its three or four letters
+static bool syllable_fits(const char *field, const uint8_t *digits, uint8_t n)
+{
+	for (uint8_t i = 0; i < n; i++) {
+		if (field[i] == '\0' || letter_digit(field[i]) != digits[i])
+			return false;
+	}
+	return true;
+}
+
+// The characters a run of keypad digits can spell (CONFIG_PINYIN, T9): every reading whose first n letters sit on
+// those digits, in table order. The table is sorted by the letters, not by the digits, so this walks every reading
+// rather than bisecting: 400 readings, each a few byte comparisons, is cheaper than a second index.
+uint16_t pinyin_candidates_t9(const uint8_t *digits, uint8_t n, uint16_t from, uint16_t *out, uint16_t cap,
+			      uint16_t *next)
+{
+	uint16_t skipped = 0, got = 0;
+
+	*next = 0;
+	if (digits == NULL || n == 0 || n > PINYIN_LETTERS_MAX || cap == 0)
+		return 0;
+	for (uint16_t syl = 0; syl < pinyin_syllable_count; syl++) {
+		char field[PINYIN_SYLLABLE_BYTES];
+		if (!syllable_at(syl, field))
+			return got;
+		if (!syllable_fits(field, digits, n))
+			continue;
+		uint16_t first = syllable_first_entry(syl);
+		uint16_t end = first;
+		while (end < pinyin_entry_count) {
+			uint16_t cp, s2;
+			if (!entry_at(end, &cp, &s2))
+				return got;
+			if (s2 != syl)
+				break;
+			if (skipped < from) {
+				skipped++;
+			} else if (got >= cap) {
+				*next = (uint16_t)(from + got);
+				return got;
+			} else {
+				out[got++] = cp;
+			}
+			end++;
+		}
+	}
+	return got;
+}
+
 uint16_t pinyin_count(void)
 {
 	return pinyin_entry_count;

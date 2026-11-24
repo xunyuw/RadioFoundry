@@ -2140,18 +2140,15 @@ enum { TEXT_UPPER, TEXT_DIGITS, TEXT_LOWER,
 	TEXT_MODES };			// the order # cycles through
 static uint8_t text_mode;
 #if CONFIG_PINYIN
-// The letters typed in the pinyin mode, the characters they spell, and the page of them the bar shows. The letters
-// are Latin and the candidates are BMP code points, so neither needs more than this
-static char pinyin_letters[PINYIN_LETTERS_MAX + 1];
+// The keypad digits typed in the pinyin mode (T9), the characters they can spell, and the page of them the bar shows.
+// A digit is 2..9; the candidates are BMP code points
+static uint8_t pinyin_digits[PINYIN_LETTERS_MAX];
 static uint8_t pinyin_len;
 #define PINYIN_PAGE	8		// candidates in the bar: 8 fits a 128 px line at the 6x12 font and leaves the count
 static uint16_t pinyin_cand[PINYIN_PAGE];
 static uint8_t pinyin_cand_n;
 static uint16_t pinyin_next;		// where the following page starts, 0 = none
 static uint8_t pinyin_pick;		// which candidate OK would take
-// The letters a pinyin keypad key carries: 2-9, the T9 sets without their digit
-static const char *const pinyin_keys[10] = { "", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz" };
-static uint8_t pinyin_key_idx;		// the letter of the key that typed last, for the same key's next one
 #endif
 #if CONFIG_SATELLITE_TLE
 static uint8_t satellite_text_line;
@@ -2234,7 +2231,6 @@ static void text_enter(void)
 	pinyin_len = 0;
 	pinyin_cand_n = 0;
 	pinyin_pick = 0;
-	pinyin_key_idx = 0;
 #endif
 }
 
@@ -2284,53 +2280,12 @@ static uint8_t utf8_put(char *dst, uint32_t cp)
 	return 3;
 }
 
-// One page of candidates for the letters typed so far
+// One page of candidates for the digits typed so far
 static void pinyin_refresh(void)
 {
-	pinyin_letters[pinyin_len] = 0;
-	pinyin_cand_n = (uint8_t)pinyin_candidates(pinyin_letters, 0, pinyin_cand, PINYIN_PAGE, &pinyin_next);
+	pinyin_cand_n = (uint8_t)pinyin_candidates_t9(pinyin_digits, pinyin_len, 0, pinyin_cand, PINYIN_PAGE,
+						      &pinyin_next);
 	pinyin_pick = 0;
-}
-
-// Take another letter (a keypad key's letter in the pinyin mode): the candidates follow it. A letter that leaves no
-// candidate is dropped rather than emptying the bar, so a typo is one BACK away
-static void pinyin_letter(char c)
-{
-	if (pinyin_len >= PINYIN_LETTERS_MAX) {
-		ui_toast(TR(TEXT_TOAST_PINYIN_FULL, "That's the longest reading"));
-		return;
-	}
-	char save = pinyin_letters[pinyin_len];
-	uint8_t save_len = pinyin_len;
-	pinyin_letters[pinyin_len++] = c;
-	pinyin_letters[pinyin_len] = 0;
-	uint16_t n = pinyin_candidates(pinyin_letters, 0, pinyin_cand, PINYIN_PAGE, &pinyin_next);
-	if (n == 0) {
-		pinyin_len = save_len;			// no character spells this: keep the letters that did
-		pinyin_letters[pinyin_len] = save;
-		return;
-	}
-	pinyin_cand_n = (uint8_t)n;
-	pinyin_pick = 0;
-}
-
-// The key's first letter: this is a new letter of the reading
-static void pinyin_key_start(int8_t k)
-{
-	pinyin_key_idx = 0;
-	pinyin_letter(pinyin_keys[k][0]);
-}
-
-// The same key again: the letter it typed last becomes the key's next one ("a" -> "b" -> "c" -> "a")
-static void pinyin_step_key(int8_t k)
-{
-	const char *set = pinyin_keys[k];
-	uint8_t n = (uint8_t)strlen(set);
-	pinyin_key_idx = (uint8_t)((pinyin_key_idx + 1u) % n);
-	if (pinyin_len > 0) {
-		pinyin_len--;			// replace the letter that key put in, which is the last one
-		pinyin_letter(set[pinyin_key_idx]);
-	}
 }
 
 // The page after the bar's last one, and back to the first past the end: the bar is the whole way through a reading
@@ -2345,7 +2300,7 @@ static void pinyin_page(bool forward)
 		return;
 	}
 	uint16_t from = pinyin_next;
-	uint16_t n = pinyin_candidates(pinyin_letters, from, pinyin_cand, PINYIN_PAGE, &pinyin_next);
+	uint16_t n = pinyin_candidates_t9(pinyin_digits, pinyin_len, from, pinyin_cand, PINYIN_PAGE, &pinyin_next);
 	if (n == 0) {
 		pinyin_refresh();
 		return;
@@ -2450,14 +2405,14 @@ static void text_draw(void)
 	} while (start_char < text_len + 1);
 
 #if CONFIG_PINYIN
-	// In the pinyin mode a bar above the hint shows the letters typed and the characters they spell; the one OK
+	// In the pinyin mode a bar above the hint shows the digits typed and the characters they spell; the one OK
 	// would take is drawn on the highlight background. One line: a 160x128 panel has no row to spare
 	if (text_mode == TEXT_PINYIN) {
 		int bar = L->hint_y - L->small->h;	// the row the count sits in; the letters sit left of it
 		char pb[PINYIN_LETTERS_MAX + 2];
 		sb_init(&b, pb, sizeof pb);
 		for (uint8_t i = 0; i < pinyin_len; i++)
-			sb_chr(&b, pinyin_letters[i]);
+			sb_chr(&b, (char)('0' + pinyin_digits[i]));
 		sb_chr(&b, pinyin_len > 0 ? '_' : ' ');
 		gfx_text(L->small, 0, bar, pb, ui_col.fg);
 		int x = gfx_text_width(L->small, pb) + 2;
@@ -2492,25 +2447,17 @@ static bool text_key_fn(const input_event_t *ev)
 		const char *set = keys[k];
 #if CONFIG_PINYIN
 		if (text_mode == TEXT_PINYIN) {
-			// A pinyin keypad: 2-9 type their first letter, and pressing the same key again steps through the keys'
-			// letters the way ABC does, so "zhuang" is reachable ("zzzz" would be a bracelet, this is the phone
-			// convention). 0 types the space's own letter set's first, 1 the punctuation's: not letters, ignored.
-			if (k >= 2) {
-				if (k == text_key && pinyin_len > 0 && now - text_ms < TEXT_MULTI_MS) {
-					const char *letters = "ABC2DEF3GHI4JKL5MNO6PQRS7TUV8WXYZ9";
-					(void)letters;
-					pinyin_step_key(k);		// the next letter of this key
-				} else {
-					pinyin_key_start(k);		// the key's first letter
-				}
-				text_key = k;
-				text_ms = now;
+			// T9: a key is a digit of the reading, not a letter to cycle. "7464" is p-i-n-g and every other reading
+			// on those keys, which is what a phone does and what a six-letter reading needs (multi-tap would be 23
+			// presses for "zhuang"). 0 and 1 carry no letters, so they add nothing.
+			if (k >= 2 && pinyin_len < PINYIN_LETTERS_MAX) {
+				pinyin_digits[pinyin_len++] = (uint8_t)k;
+				pinyin_refresh();
 				ui_dirty();
 				return true;
 			}
-			text_ms = now;
 			ui_dirty();
-			return true;			// 0 and 1 have no letter: nothing to type
+			return true;
 		}
 #endif
 		if (text_mode == TEXT_DIGITS || ev->gesture == GESTURE_LONG) {
@@ -2590,7 +2537,7 @@ static bool text_key_fn(const input_event_t *ev)
 			(ev->action == ACT_QUICK && press)) {	// a slow * deletes too (it doesn't lock here)
 #if CONFIG_PINYIN
 		if (text_mode == TEXT_PINYIN && pinyin_len > 0) {
-			pinyin_len--;		// BACK in the middle of a reading drops one letter, not a character of the name
+			pinyin_len--;		// BACK drops one digit of the reading, not a character of the name
 			pinyin_refresh();
 			text_key = -1;
 			ui_dirty();

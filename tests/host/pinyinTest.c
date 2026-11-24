@@ -100,12 +100,73 @@ static void test_utf8(void)
 	CHECK((unsigned char)utf8[0] == 0xE4 && (unsigned char)utf8[1] == 0xBD && (unsigned char)utf8[2] == 0xA0);
 }
 
+// T9: a key stands for all its letters, so one digit run reaches several readings. 746 is p-i-n and spells 拼 (pin);
+// 7464 is p-i-n-g and q-i-n-g, so it reaches 平 (ping) and 青 (qing) both
+static void test_t9(void)
+{
+	uint16_t out[8], next = 1;
+
+	// No digits, nothing to spell
+	CHECK(pinyin_candidates_t9(NULL, 0, 0, out, 8, &next) == 0 && next == 0);
+	CHECK(pinyin_candidates_t9(NULL, 4, 0, out, 8, &next) == 0);
+
+	// 746 is pin: 拼 (U+62FC). 7464 is ping and qing, so 平 (U+5E73) and 青 (U+9752)
+	{
+		static const uint8_t pin[3] = { 7, 4, 6 };
+		static const uint8_t d[4] = { 7, 4, 6, 4 };
+		uint16_t total = 0, page = 0;
+		bool has_pin = false, has_ping = false, has_qing = false;
+		do {
+			uint16_t n = pinyin_candidates_t9(pin, 3, page, out, 8, &next);
+			for (uint16_t i = 0; i < n; i++)
+				has_pin = has_pin || out[i] == 0x62FC;
+			total = (uint16_t)(total + n);
+			page = next;
+		} while (next != 0 && total < 6000);
+		CHECK(has_pin);
+		total = 0; page = 0; next = 1;
+		do {
+			uint16_t n = pinyin_candidates_t9(d, 4, page, out, 8, &next);
+			for (uint16_t i = 0; i < n; i++) {
+				has_ping = has_ping || out[i] == 0x5E73;
+				has_qing = has_qing || out[i] == 0x9752;
+			}
+			total = (uint16_t)(total + n);
+			page = next;
+		} while (next != 0 && total < 6000);
+		CHECK(has_ping);
+		CHECK(has_qing);
+		CHECK(total > 0);
+	}
+
+	// A digit no reading starts with spell nothing: 1 and 0 carry no letters, and no reading begins with 9's letters
+	// in a row
+	{
+		static const uint8_t one[1] = { 1 };
+		CHECK(pinyin_candidates_t9(one, 1, 0, out, 8, &next) == 0);
+	}
+
+	// Every candidate is a reading whose letters sit on the digits: "zhuang" is 9-4-8-2-6-4 and must be found
+	{
+		static const uint8_t zhuang[6] = { 9, 4, 8, 2, 6, 4 };
+		uint16_t n = pinyin_candidates_t9(zhuang, 6, 0, out, 8, &next);
+		CHECK(n > 0);
+	}
+
+	// More digits than a reading can have: none
+	{
+		static const uint8_t many[7] = { 2, 2, 2, 2, 2, 2, 2 };
+		CHECK(pinyin_candidates_t9(many, 7, 0, out, 8, &next) == 0);
+	}
+}
+
 int main(void)
 {
 	test_tables();
 	test_lookup();
 	test_pages();
 	test_utf8();
+	test_t9();
 	if (failures == 0)
 		printf("# pinyinTest: %d checks, PASSED\n", checks);
 	else

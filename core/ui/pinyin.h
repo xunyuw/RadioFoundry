@@ -44,6 +44,12 @@ extern const uint16_t pinyin_entry_count;
 // An empty prefix has no candidates (the editor shows the plain modes until a letter is typed).
 uint16_t pinyin_candidates(const char *prefix, uint16_t from, uint16_t *out, uint16_t cap, uint16_t *next);
 
+// T9: the same, for a run of keypad digits. A key stands for any of its letters (2 abc .. 9 wxyz), so "7464" finds
+// every character whose reading starts with p/i/n/g on those keys -- ping, and qing's neighbours on other keys.
+// digits[] holds 2..9, n how many. Same paging as pinyin_candidates.
+uint16_t pinyin_candidates_t9(const uint8_t *digits, uint8_t n, uint16_t from, uint16_t *out, uint16_t cap,
+			      uint16_t *next);
+
 // How many characters the whole GB2312 set has a reading for: the size of the table, for tests and the UI's counts
 uint16_t pinyin_count(void);
 
