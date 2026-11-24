@@ -250,12 +250,13 @@ class Link:
         return parse_kv(self.request(CMD_VERSION).decode("ascii", "replace"))
 
     def view(self, section=VIEW_CORE):
-        """One section of the radio's view as a dict (debuglink_view_section). The reply is a 6-byte header - status,
-        the radio's clock and the next section - then key=value lines."""
+        """One section of the radio's view as a dict (debuglink_view_section). request() hands back the payload with the
+        status byte already stripped, so what is left of the 6-byte reply header is the radio's clock (4) and the next
+        section (1); the key=value lines follow."""
         r = self.request(CMD_GET_VIEW, bytes([section]))
-        if len(r) < 6 or r[0] != 0:
+        if len(r) < 5:
             raise LinkError("the radio refused section %d of its view" % section)
-        return parse_kv(r[6:].decode("ascii", "replace"))
+        return parse_kv(r[5:].decode("ascii", "replace"))
 
     def font_table(self):
         """The CJK table a build reports in its core view: {glyphs, in_flash, addr, index_hash}, {} when it has none.
