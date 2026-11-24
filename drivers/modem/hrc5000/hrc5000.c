@@ -370,7 +370,7 @@ bool hrc5000_set_mode_dmr(hrc5000_t *dev, uint8_t mod2, uint8_t mod1, uint8_t mi
 	for (uint8_t reg = 0x24; reg <= 0x27; reg++) {
 		ok &= hrc_write(h, HRC_PAGE_AUX, reg, 0x00);	// no privacy key
 	}
-	ok &= hrc_write(h, HRC_PAGE_SYS, REG_INT_MASK, 0x19);	// system interrupt mask
+	ok &= hrc_write(h, HRC_PAGE_SYS, REG_INT_MASK, HRC_INT_MASK_DMR);
 	ok &= hrc_write(h, HRC_PAGE_SYS, 0x85, 0x00);
 	dev->mode = HRC5000_MODE_DMR;
 	return ok;
@@ -414,7 +414,13 @@ bool hrc5000_tx_lead_on(hrc5000_t *dev, hrc5000_lead_t *l, uint8_t steps)
 		}
 		l->kept = true;
 	}
-	l->on = hrc_write(&dev->hrc, HRC_PAGE_SYS, REG_TX_LEAD, (uint8_t)((l->saved & 0xC0u) | (steps & 0x3Fu)));
+	uint8_t base = (uint8_t)(l->saved & 0x3Fu);
+	if (steps > 0x3Fu - base) {
+		steps = (uint8_t)(0x3Fu - base);
+	}
+	l->us = (uint16_t)(((uint32_t)steps * HRC5000_TX_LEAD_STEP_NUM + HRC5000_TX_LEAD_STEP_DEN / 2u) /
+			   HRC5000_TX_LEAD_STEP_DEN);
+	l->on = hrc_write(&dev->hrc, HRC_PAGE_SYS, REG_TX_LEAD, (uint8_t)((l->saved & 0xC0u) | (base + steps)));
 	return l->on;
 }
 
