@@ -64,6 +64,10 @@ void settings_defaults(settings_t *s)
 	s->vfo2_cc = 1;
 	s->vfo2_ts = 1;
 	s->satellite_index = SETTINGS_UNSET8;
+	// A DG-ID stays the channel's own record's until one is set here: 0 would be a radio-wide "any DG-ID" overriding
+	// every Fusion channel's own, since radio_ysf.c reads any value <= 99 as set
+	s->ysf_tx_dgid = SETTINGS_UNSET8;
+	s->ysf_rx_dgid = SETTINGS_UNSET8;
 	s->power_levels = board.power_count;
 }
 

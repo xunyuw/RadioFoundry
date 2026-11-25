@@ -28,6 +28,8 @@
 #include "codeplug/codeplug_tag.h"
 #include "codeplug/codeplug_records.h"
 #include "ysf/ysf_codeplug.h"
+#include "ysf/ysf_air.h"
+#include "air/air_syms.h"
 #include "ysf/ysf_engine.h"
 #include "storage/storage.h"
 #include "settings/settings.h"
@@ -154,7 +156,9 @@ static uint16_t t_rx_read(int16_t *buf, uint16_t max)
 static bool t_inject(audio_tap_pull_t pull, audio_tap_mode_t mode) { (void)mode; tx_pull_fn = pull; return true; }
 static const audio_tap_flat_cal_t cal = { .tx_1khz = 3000 };
 static const audio_tap_flat_cal_t *t_cal(void) { return &cal; }
-static const hal_audio_tap_t tap = {
+// Not const: one test needs the flat route to say no (path_ok, radio_ysf.c). The chip route only runs where there is
+// no flat tap, and every other test here runs the flat one, so it gets its caps back afterwards
+static hal_audio_tap_t tap = {
 	.caps = AUDIO_TAP_FM_RX_RAW | AUDIO_TAP_FM_TX_FLAT,
 	.fm_tx_inject = t_inject,
 	.fm_rx_flat_rate_hz = 8000,
@@ -163,6 +167,103 @@ static const hal_audio_tap_t tap = {
 	.fm_rx_flat_stop = t_rx_stop,
 	.flat_cal = t_cal,
 };
+
+// --- the fake air provider: the chip route (ysf-modem.md 1.7) ---
+//
+// The receive side hands the framer packed dibits, as the chip's copy does (hal_air.h air_chunk_t: four symbols a
+// byte), and keeps the transmit queue the core fills. A test pushes frames in from the other station and drains the
+// queue the core filled, so both directions run the real framer, the real engine and the real radio_ysf.c.
+static air_event_cb_t air_cb;
+#define AIR_QUEUE	4u	// what an HR_C6000 session holds
+static air_tx_chunk_t air_q[AIR_QUEUE];
+static uint32_t air_q_head, air_q_tail;
+static bool air_open_now, air_tx_begun, air_end_pending;
+static uint32_t air_rx_restarts, air_opens, air_closes;
+
+static uint32_t a_fit(const air_profile_t *p)
+{
+	(void)p;
+	return AIR_FIT_RX | AIR_FIT_TX;	// what the copy gives: the soft modem receives, the physical layer sends
+}
+static bool a_open(const air_profile_t *p, air_event_cb_t cb, void *ctx)
+{
+	(void)p; (void)ctx;
+	if (air_open_now) {
+		return false;
+	}
+	air_open_now = true;
+	air_cb = cb;
+	air_opens++;
+	return true;
+}
+static void a_close(void)
+{
+	if (air_open_now) {
+		air_open_now = false;
+		air_cb = NULL;
+		air_q_head = air_q_tail = 0;
+		air_tx_begun = false;
+		air_end_pending = false;
+		air_closes++;
+	}
+}
+static void a_rx_restart(void) { air_rx_restarts++; }
+static bool a_tx_begin(void)
+{
+	if (!air_open_now || air_q_head == air_q_tail) {
+		return false;
+	}
+	air_tx_begun = true;
+	return true;
+}
+static bool a_tx_queue(const air_tx_chunk_t *c)
+{
+	if (!air_open_now || air_q_head - air_q_tail >= AIR_QUEUE || air_end_pending) {
+		return false;
+	}
+	air_q[air_q_head % AIR_QUEUE] = *c;
+	air_q_head++;
+	return true;
+}
+static uint8_t a_tx_space(void)
+{
+	return (uint8_t)(air_open_now ? AIR_QUEUE - (air_q_head - air_q_tail) : 0u);
+}
+static void a_tx_end(void) { air_end_pending = true; }
+static void a_tx_abort(void)
+{
+	air_q_head = air_q_tail = 0;
+	air_tx_begun = false;
+	air_end_pending = false;
+	if (air_cb != NULL) {
+		air_event_t ev = { .kind = AIR_EV_TX_DONE };
+		air_cb(&ev, NULL);
+	}
+}
+static uint32_t a_now_us(void) { return micros_now; }
+static const hal_air_t air_provider = {
+	.fit = a_fit, .open = a_open, .close = a_close, .rx_restart = a_rx_restart, .tx_begin = a_tx_begin,
+	.tx_queue = a_tx_queue, .tx_space = a_tx_space, .tx_end = a_tx_end, .tx_abort = a_tx_abort,
+	.now_us = a_now_us, .slot_clock = NULL, .slot_slew = NULL,
+	.tx_chunk_syms = 144, .tx_queue_depth = AIR_QUEUE, .tx_lead_ms = 60, .time_accuracy_us = 3000,
+};
+
+// The core's blocks to the chip route's receiver, as the provider hands them: the engine's 144-symbol block is exactly
+// one chunk, packed four symbols a byte. soft is NULL: a chip that decides its own symbols hands hard ones only, and
+// the framer's slicer would read zeros as the inner levels
+static void air_push_block(const uint8_t *block, uint8_t flags)
+{
+	if (air_cb == NULL) {
+		return;
+	}
+	air_chunk_t c = { .t_us = micros_now, .nsyms = 144, .sync_at = -1, .sync_id = 0, .flags = (uint8_t)(flags & AIR_CHUNK_FREE_RUN),
+			  .rssi_dbm = 0, .hard = block, .soft = NULL };
+	air_event_t ev = { .kind = AIR_EV_RX, .t_us = c.t_us, .chunk = &c };
+	air_cb(&ev, NULL);
+}
+
+// The queue the core filled, as the chip would send it: one chunk a slot
+static uint32_t air_sent_chunks(void) { return (uint32_t)(air_q_head - air_q_tail); }
 
 #define FLASH_SIZE	0x200000u
 static const hal_flash_map_t map = {
@@ -173,16 +274,28 @@ static const hal_flash_map_t map = {
 static band_t bands[] = { { 136000000, 174000000, true }, { 400000000, 480000000, true } };
 // No hooks: only the mic PCM gain (hal_radio_t.mic_pcm_db) is read, by radio/mic_gain.c
 static hal_radio_t radio;
+// The chip route (ysf-modem.md 1.7) needs an air provider and no flat tap; the flat routes are what every other test
+// here runs. The air provider is always there for route_pick to find, and a test that wants it takes the flat tap's
+// caps away (path_ok, radio_ysf.c: the flat tap wins wherever it answers, which is what every other test runs)
 const board_t board = { .name = "test", .bands = bands, .band_count = 2, .power_count = 9, .flash = &sim_flash,
-		  .audio_tap = &tap, .vocoder = &vocoder, .radio = &radio };
+		  .audio_tap = &tap, .vocoder = &vocoder, .radio = &radio, .air = &air_provider };
 
 // DMR's half of radio_set_mic_gain: no DMR voice here
 void ambeVoiceSetMicGainQ8(uint16_t q8) { (void)q8; }
 
-// The settings the bench's calibration lives in (radio_flat.c reads them over the board's)
+// The settings the bench's calibration lives in (radio_flat.c reads them over the board's). Defaults like the radio's:
+// the DG-IDs unset, so each channel's own record is what runs
 static settings_t sets;
 settings_t *settings_begin(void) { return &sets; }
 void settings_end(uint32_t now_ms) { (void)now_ms; }
+static void settings_reset(void)
+{
+	// The radio's defaults for the two Fusion fields, without settings.c in this test: unset, so each channel's own
+	// record's DG-IDs are what runs (radio_ysf.c reads any value <= 99 as set)
+	memset(&sets, 0, sizeof sets);
+	sets.ysf_tx_dgid = 0xFF;
+	sets.ysf_rx_dgid = 0xFF;
+}
 
 // --- set-up ---
 
@@ -848,8 +961,143 @@ static void test_stats_preempted(void)
 	radio_mode_ram_give(RADIO_MODE_RAM_DSTAR);
 }
 
+// --- the chip route (ysf-modem.md 1.7): the air provider instead of the flat tap ---
+
+// The chip's route picks its session and hands the engine's blocks straight to the queue. What the radio showed when
+// it did not: tx_on was never set, so the mic callback encoded nothing and every block was the silence frame
+static void test_air_transmit(void)
+{
+	channel(0, 0, "G4XYZ");
+	radio_ysf_init(&audio);
+	air_open_now = false;
+	tap.caps = 0;	// no flat route: route_pick takes the air provider
+	air_q_head = air_q_tail = 0;
+	air_tx_begun = false;
+	air_end_pending = false;
+	air_opens = air_closes = 0;
+	CHECK(radio_ysf_start(5, &ch, 0), "start");
+	radio_ysf_view_t v;
+	radio_ysf_view(&v);
+	CHECK(v.on && v.route == 2, "the chip route: on %d route %u", v.on, v.route);
+	CHECK(air_open_now && air_opens == 1, "a session opened (%u opens, open now %d)", air_opens, air_open_now);
+	CHECK(radio_ysf_tx_start(now_ms), "tx start");
+	CHECK(air_sent_chunks() > 0 || air_end_pending, "blocks queued for the provider");
+
+	// The audio task's blocks: these are what the encoder fills, and the only source of the blocks the provider sends
+	for (int t = 0; t < 25; t++) {
+		int16_t mic[160], spk[160];
+		for (int i = 0; i < 160; i++) {
+			mic[i] = (int16_t)((t * 160 + i) % 200 - 100);	// something to encode: a silent mic sends silence
+		}
+		stream_cb(mic, spk, NULL);
+		now_ms += 20;
+
+		// The provider's slots: take what the core queued, as the chip sends a chunk a slot
+		if (air_q_head != air_q_tail) {
+			air_q_tail++;
+			if (air_cb != NULL) {
+				air_event_t ev = { .kind = AIR_EV_TX_SPACE };
+				air_cb(&ev, NULL);
+			}
+		}
+	}
+
+	radio_ysf_stats_t st;
+	radio_ysf_stats(&st);
+	CHECK(st.tx_frames > 0, "frames encoded: %u", (unsigned)st.tx_frames);
+	CHECK(st.tx_blocks > 0, "blocks queued on the chip route: %u", (unsigned)st.tx_blocks);
+
+	// Release: the terminator, then the last block, then the provider's done
+	radio_ysf_tx_release();
+	for (int t = 0; t < 300 && !radio_ysf_tx_done(now_ms); t++) {
+		if (air_q_head != air_q_tail) {
+			air_q_tail++;
+		}
+		now_ms += 20;
+	}
+	CHECK(radio_ysf_tx_done(now_ms), "the release ended the transmission");
+	radio_ysf_stop();
+	air_open_now = false;
+	tap.caps = AUDIO_TAP_FM_RX_RAW | AUDIO_TAP_FM_TX_FLAT;	// the flat routes back for the rest
+}
+
+// A call from the other station into the chip route: the framer's frames reach the frame layer packed, and the frame
+// layer finds a sync in them. What the radio showed when it did not: 156 framer syncs and not one frame-layer sync
+static void test_air_receive(void)
+{
+	channel(0, 0, "G4XYZ");
+	radio_ysf_init(&audio);
+	air_open_now = false;
+	tap.caps = 0;	// no flat route: route_pick takes the air provider
+	air_q_head = air_q_tail = 0;
+	air_rx_restarts = 0;
+	CHECK(radio_ysf_start(5, &ch, 0), "start");
+	CHECK(air_open_now, "a session opened");
+
+	// The other station's transmission, the way a Yaesu radio sends one: its engine's blocks are the chunks the framer
+	// gets. The same engine the flat tests use, read a block at a time instead of a sample
+	dec_n = dec_match = 0;
+	dec_want_base = 0;
+	far_start();
+	static ysf_engine_t src;
+	src_t s = { 0, 30 };
+	ysf_tx_config_t c;
+	memset(&c, 0, sizeof c);
+	ysf_csd_init(&c.csd, "M0ABC", NULL);
+	c.fich.cm = YSF_CM_GROUP;
+	c.preamble = 240;
+	c.headers = 1;
+	c.pull = other_pull;
+	c.ctx = &s;
+	ysf_path_t p = { 0 };	// no rate: the engine's blocks, not its modulator
+	ysf_engine_tx_start(&src, &p, &c);
+
+	bool seen_rx = false, seen_play = false;
+	uint8_t block[YSF_PHY_BLOCK_BYTES];
+	for (int t = 0; t < 700; t++) {
+		if (s.n >= s.limit) {
+			ysf_engine_tx_stop(&src);
+		}
+		if (!ysf_engine_tx_block(&src, block)) {
+			break;
+		}
+		air_push_block(block, 0);
+		step();
+		now_ms += 20;
+		seen_rx = seen_rx || radio_ysf_receiving();
+		seen_play = seen_play || (radio_ysf_playing() && speaker_on);
+	}
+	radio_ysf_poll(now_ms);
+	radio_ysf_stats_t st;
+	radio_ysf_stats(&st);
+	CHECK(st.syncs > 0, "the frame layer found syncs on the chip route: %u", (unsigned)st.syncs);
+	CHECK(st.fich_good > 0, "FICH decoded: %u good, %u bad", (unsigned)st.fich_good, (unsigned)st.fich_bad);
+	CHECK(seen_rx && seen_play, "heard and played");
+	CHECK(st.rx_frames > 0, "voice frames in: %u", (unsigned)st.rx_frames);
+
+	// The signal goes: chunks of nothing the framer can sync on. The framer drops its lock, and that is what ends the
+	// call: its own rx_lost reaches the frame layer (a framer that stops handing frames would leave the receiver in
+	// its call for good, since the frame layer's four missed syncs need symbols it no longer sends). A call that ended
+	// with its own terminator is already down here, so the check is that the noise does not bring it back
+	uint8_t noise[YSF_PHY_BLOCK_BYTES];
+	for (unsigned b = 0; b < YSF_PHY_BLOCK_BYTES; b++) {
+		noise[b] = 0xE4;	// dibits 3,2,1,0: the inner level both ways, no 40-bit sync anywhere in a run of it
+	}
+	for (int t = 0; t < 20; t++) {
+		air_push_block(noise, 0);
+		step();
+		now_ms += 20;
+	}
+	radio_ysf_poll(now_ms);
+	CHECK(!radio_ysf_receiving(), "noise after the call does not hold it open");
+	radio_ysf_stop();
+	air_open_now = false;
+	tap.caps = AUDIO_TAP_FM_RX_RAW | AUDIO_TAP_FM_TX_FLAT;	// the flat routes back for the rest
+}
+
 int main(void)
 {
+	settings_reset();	// like the radio's own defaults: each channel's DG-IDs are its record's
 	test_receive();
 	test_dgid();
 	test_silence_first_over();
@@ -862,6 +1110,8 @@ int main(void)
 	test_stop_mid_tx();
 	test_no_area();
 	test_stats_preempted();
+	test_air_transmit();
+	test_air_receive();
 	test_dn_mic_gain();
 	sim_flash_free();
 	printf("%s ysfRadioTest: %d failure(s)\n", failures ? "FAIL" : "ok", failures);
