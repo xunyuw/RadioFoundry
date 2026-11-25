@@ -209,6 +209,7 @@ msgctxt "HOTSPOT_BANNER_OK_STOPS"
 msgid "OK stops it"
 msgstr "OK 停止"
 
+#: core/ui/ui_app.c
 msgctxt "APRS_BANNER_MSG_FROM"
 msgid "APRS message from "
 msgstr "APRS 信息来自 "
@@ -482,6 +483,11 @@ msgstr "此处不可发射"
 msgctxt "WHY_COLOR_CODE_NOT_IN_BUILD"
 msgid "Color code: not in this build"
 msgstr "色码：本版本无"
+
+#: core/ui/ui_app.c
+msgctxt "WHY_DGID_NOT_IN_BUILD"
+msgid "DG-ID: not in this build"
+msgstr "DG-ID：本版本不支持"
 
 #: core/ui/ui_app.c
 msgctxt "QUICK_WHY_FM_ONLY_DMR_CHANNEL"
@@ -2252,11 +2258,6 @@ msgstr "空区域"
 msgctxt "TEXT_TOAST_FULL"
 msgid "That's the most it can hold"
 msgstr "已达上限"
-
-#: core/ui/ui_menus.c
-msgctxt "TEXT_TOAST_PINYIN_FULL"
-msgid "That's the longest reading"
-msgstr "已达最长拼读"
 
 #: core/ui/ui_menus.c
 msgctxt "LABEL_NAME"
@@ -5857,6 +5858,16 @@ msgstr "{复制到 VFO|到 VFO}"
 msgctxt "QUICK_LABEL_TX_FREQ"
 msgid "{TX freq|TXFreq}"
 msgstr "{发射频率|发频}"
+
+#: core/ui/ui_screens.c
+msgctxt "QUICK_LABEL_DGID"
+msgid "DG-ID"
+msgstr "DG-ID"
+
+#: core/ui/ui_screens.c
+msgctxt "QUICK_LABEL_ROOM"
+msgid "Room"
+msgstr "房间"
 
 #: core/ui/ui_screens.c
 msgctxt "QUICK_LABEL_TONE_TX"

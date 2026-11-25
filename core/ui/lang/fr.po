@@ -207,6 +207,7 @@ msgctxt "HOTSPOT_BANNER_OK_STOPS"
 msgid "OK stops it"
 msgstr "OK pour arrêter"
 
+#: core/ui/ui_app.c
 msgctxt "APRS_BANNER_MSG_FROM"
 msgid "APRS message from "
 msgstr "Message APRS de "
@@ -480,6 +481,11 @@ msgstr "Émission impossible"
 msgctxt "WHY_COLOR_CODE_NOT_IN_BUILD"
 msgid "Color code: not in this build"
 msgstr "Code coul indispo."
+
+#: core/ui/ui_app.c
+msgctxt "WHY_DGID_NOT_IN_BUILD"
+msgid "DG-ID: not in this build"
+msgstr "DG-ID : absent de cette version"
 
 #: core/ui/ui_app.c
 msgctxt "QUICK_WHY_FM_ONLY_DMR_CHANNEL"
@@ -2250,11 +2256,6 @@ msgstr "Zone vide"
 msgctxt "TEXT_TOAST_FULL"
 msgid "That's the most it can hold"
 msgstr "Capacité maximale"
-
-#: core/ui/ui_menus.c
-msgctxt "TEXT_TOAST_PINYIN_FULL"
-msgid "That's the longest reading"
-msgstr "C'est la lecture la plus longue"
 
 #: core/ui/ui_menus.c
 msgctxt "LABEL_NAME"
@@ -5855,6 +5856,16 @@ msgstr "{Copier VFO|Vers VFO}"
 msgctxt "QUICK_LABEL_TX_FREQ"
 msgid "{TX freq|TXFreq}"
 msgstr "{Fréq TX|FréqTX}"
+
+#: core/ui/ui_screens.c
+msgctxt "QUICK_LABEL_DGID"
+msgid "DG-ID"
+msgstr "DG-ID"
+
+#: core/ui/ui_screens.c
+msgctxt "QUICK_LABEL_ROOM"
+msgid "Room"
+msgstr "Salon"
 
 #: core/ui/ui_screens.c
 msgctxt "QUICK_LABEL_TONE_TX"
