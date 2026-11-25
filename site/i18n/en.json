@@ -531,6 +531,8 @@
  "flash.font.entering": "Entering the loader…",
  "flash.font.writing": "Writing {what}…",
  "flash.font.done": "The radio has the Chinese font. Switch the radio's language in Settings > Display > Language.",
+ "flash.font.wrote": "Wrote {what}.",
+ "flash.font.already": "{what} was already this file.",
  "flash.font.no_row": "This radio has no {what} row: its build keeps the glyphs inside the firmware image.",
  "flash.font.bad_size": "{what}: the file is {size} bytes and the row holds {want}.",
  "flash.font.err": "The font could not be written: {why}",

@@ -2858,13 +2858,18 @@ function fontView() {
 			S.link = null;			// the port belongs to the loader from here
 			const json = await f4StubJson();
 			await stub.enterFromRFoundry(f4Image(json), (d, n) => progress.set(d, n, t("flash.font.entering")), { entry: json.run });
+			const done = [];
 			for (const x of todo) {
 				progress.set(0, 1, t("flash.font.writing", { what: x.label }));
+				// The stub compares each sector's CRC and writes only what differs, then verifies what it wrote, so
+				// `same` here means the row already held this exact file: said, so a radio that was right all along
+				// does not read as a write that hung
 				const r = await writeRow(stub, x.row, files[x.what], (d, n) => progress.set(d, n, t("flash.font.writing", { what: x.label })));
 				diag.note("font written", { what: x.what, ...r });
+				done.push(r?.same ? t("flash.font.already", { what: x.label }) : t("flash.font.wrote", { what: x.label }));
 			}
 			progress.el.remove();
-			say(notice(t("flash.font.done"), "ok"));
+			say(notice(`${done.join(" ")} ${t("flash.font.done")}`, "ok"));
 		} catch (e) {
 			diag.error("flash/font", e);
 			progress.el.remove();

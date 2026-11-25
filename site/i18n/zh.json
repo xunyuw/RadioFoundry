@@ -531,6 +531,8 @@
  "flash.font.entering": "正在进入引导器…",
  "flash.font.writing": "正在写入{what}…",
  "flash.font.done": "电台已有中文字库。在 设置 > 显示 > 语言 里切换语言。",
+ "flash.font.wrote": "已写入{what}。",
+ "flash.font.already": "{what} 本来就是这个文件。",
  "flash.font.no_row": "这台电台没有{what}区：它的固件把字形放在镜像内部。",
  "flash.font.bad_size": "{what}：文件是 {size} 字节，该区容纳 {want} 字节。",
  "flash.font.err": "字库写入失败：{why}",

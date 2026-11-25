@@ -531,6 +531,8 @@
  "flash.font.entering": "Entrando al cargador…",
  "flash.font.writing": "Escribiendo {what}…",
  "flash.font.done": "La radio tiene la fuente china. Cambia el idioma en Ajustes > Pantalla > Idioma.",
+ "flash.font.wrote": "Escrito {what}.",
+ "flash.font.already": "{what} ya era este archivo.",
  "flash.font.no_row": "Esta radio no tiene fila de {what}: su compilación guarda los glifos dentro de la imagen.",
  "flash.font.bad_size": "{what}: el archivo tiene {size} bytes y la fila admite {want}.",
  "flash.font.err": "No se pudo escribir la fuente: {why}",

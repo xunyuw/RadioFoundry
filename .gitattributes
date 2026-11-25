@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 The RadioFoundry Authors
+#
+# Shell and Python scripts run under a POSIX shell or interpreter, which reads a CR as part of a word: a checkout that
+# turned their line ends into CRLF (core.autocrlf on Windows) makes every one of them fail with "Syntax error: word
+# unexpected". Kept as LF whatever the machine, so the same tree builds in Git Bash, WSL and on the radio.
+*.sh		text eol=lf
+*.py		text eol=lf
+Makefile	text eol=lf
+*.mk		text eol=lf
+
+# Everything else may take the platform's line ends: the editors here write CRLF and nothing in the build reads those
+# files a line at a time
+*		text=auto

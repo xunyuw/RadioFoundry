@@ -531,6 +531,8 @@
  "flash.font.entering": "Ingresso nel loader…",
  "flash.font.writing": "Scrivendo {what}…",
  "flash.font.done": "La radio ha il font cinese. Cambia la lingua in Impostazioni > Display > Lingua.",
+ "flash.font.wrote": "{what} scritto.",
+ "flash.font.already": "{what} era già questo file.",
  "flash.font.no_row": "Questa radio non ha una riga {what}: la sua build tiene i glifi dentro l'immagine.",
  "flash.font.bad_size": "{what}: il file ha {size} byte e la riga ne tiene {want}.",
  "flash.font.err": "Non è stato possibile scrivere il font: {why}",
