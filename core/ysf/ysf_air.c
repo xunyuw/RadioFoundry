@@ -41,9 +41,11 @@ const air_mode_t ysf_air_mode = {
 		.levels = 4,
 		.shape = AIR_SHAPE_C4FM,	// Y 3.2 table 3-1: the same pulse as DMR, roll-off 0.2
 		.shape_param = 20,
-		// 1.6: a Yaesu radio's wide setting, +-900 / +-2700 Hz; 1800 is the outer level that keeps the pair inside
-		// the chip's checked range (1050-2400 Hz, modem-hrc6000.md 10.3) and the correlator's receive band
-		.dev_outer_hz = 1800,
+		// 1.6: a Yaesu radio's wide setting, +-900 / +-2700 Hz. The outer level is the one a stock radio decides its
+		// symbols against, so a transmission at any other deviation reads as the wrong levels there: 2700, the standard,
+		// inside the chip's checked range (1050-2400 Hz, modem-hrc6000.md 10.3) for the pair and the correlator's
+		// receive band (1700-2900 Hz)
+		.dev_outer_hz = 2700,
 		.timing = AIR_TIMING_CONTINUOUS,
 		.bw = RADIO_BW_25K,		// 1.3
 		.slot_syms = 0,

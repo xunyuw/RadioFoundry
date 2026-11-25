@@ -60,6 +60,7 @@ enum {
 	DL_VIEW_NXDN,		// NXDN on the channel: the call, settings, the provider's fit, engine counters (debuglink_view_nxdn.c)
 	DL_VIEW_DSTAR,		// D-STAR: heard, PTT's header, voice path counters, calibration (debuglink_dstar.c)
 	DL_VIEW_YSF,		// Fusion: the channel, the transmission heard, the receiver's counters (debuglink_view_ysf.c)
+	DL_VIEW_CJK,		// the CJK table this build carries: glyph count, where the bitmaps are, the index's hash
 	DL_VIEW_COUNT
 };
 #define DL_VIEW_VERSION		5	// bumped when a key changes meaning or goes away (new keys don't bump it)

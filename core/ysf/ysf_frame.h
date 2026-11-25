@@ -204,6 +204,10 @@ static inline void ysf_rx_voice_fr(ysf_rx_t *r, ysf_voice_fr_t fn)
 void ysf_rx_symbol(void *rx, int16_t soft, int16_t unit);
 // One hard dibit, from a modem that decides its symbols itself (a chip's own 4FSK receiver)
 void ysf_rx_dibit(ysf_rx_t *r, uint8_t dibit);
+// The signal is gone (the chip's framer lost its sync, a symbol path stopped): a call in progress ends as lost, and
+// the search starts over. A symbol path's own four missed syncs get there first; a chip's framer that stops handing
+// frames would leave the receiver in its call for good without this
+void ysf_rx_lost(ysf_rx_t *r);
 // The receiver holds a frame sync (the demodulator's loops may slow down)
 static inline bool ysf_rx_locked(const ysf_rx_t *r)
 {

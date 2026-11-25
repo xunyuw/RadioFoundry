@@ -21,6 +21,7 @@
 #include "config.h"
 #if CONFIG_YSF
 #include "ysf/ysf_engine.h"
+#include "ysf/ysf_frame.h"
 #include "radio/radio_ysf_vw.h"
 #if CONFIG_YSF_AIR
 #include "air/air_framer.h"
@@ -93,6 +94,9 @@ typedef struct {
 	// What PTT sends
 	char tx_src[RADIO_YSF_CALL + 1], tx_dest[RADIO_YSF_CALL + 1];
 	uint8_t tx_dgid, rx_dgid;
+	uint8_t route;			// RYSF_ROUTE_*: what the last start tried (0 none, 1 the flat tap, 2 the chip's copy)
+	uint8_t steps;			// RYSF_STEP_*: how far the last start got, for a refusal that says no more
+	uint8_t tx_space;		// the provider's room at the last fill: 0 means its session is not open for it
 	bool tx_narrow;
 	bool tx_vw;		// PTT sends Voice FR (VW), not DN: the channel's flag (ysf-codeplug.md 2.1)
 	bool no_call;		// no callsign anywhere: PTT is refused
@@ -115,6 +119,10 @@ typedef struct {
 	uint32_t vw_dec_max_us, vw_dec_avg_us, vw_dec_blocks, vw_dec_worst_us;
 	uint32_t tx_overs;
 	uint32_t tx_frames;	// frames encoded
+	uint32_t tx_blocks;	// 144-symbol blocks queued on the chip's air route (CONFIG_YSF_AIR)
+	// The chip's receive route: symbol chunks the provider handed in, with their symbols, and the framer's syncs,
+	// locks and frames (air_framer.h). A locked framer that stops seeing syncs is what ends a call on air
+	uint32_t rx_chunks, rx_syms, fr_syncs, fr_locks, fr_frames;
 	uint32_t tx_underruns;	// frames the transmitter wanted with none encoded: the silence frame went instead
 	uint32_t tx_overflows;	// encoded frames dropped, the queue full
 	uint32_t tx_samples;	// samples the board pulled
@@ -157,8 +165,10 @@ typedef struct {
 	// soft modem that turns the chip's FM copy into them, and the two buffers both work in
 	air_framer_t air_fr;
 	air_softmodem_t air_sm;
-	uint8_t air_hard[YSF_PHY_BLOCK_BYTES * 4u];
-	int8_t air_soft[YSF_PHY_BLOCK_SYMS * 4u];
+	// One frame's symbols, the longest unit air_framer cuts for this mode: 480 dibits, 120 bytes packed four to
+	// a byte (hal_air.h), and one soft value each
+	uint8_t air_hard[YSF_FRAME_DIBITS / 4u];
+	int8_t air_soft[YSF_FRAME_DIBITS];
 #endif
 } radio_ysf_area_t;
 #endif
@@ -174,8 +184,18 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms);
 // Leaving it (before the next rx() or set_mode()): receive off, the stream stopped
 void radio_ysf_stop(void);
 bool radio_ysf_running(void);
+// Whether this board and build can run a Fusion channel at all (the flat paths, or the chip's air interface): the VFO's
+// mode tile offers C4FM only where it is true
+bool radio_ysf_fits(void);
+// Whether this transmission is the chip's route's (the radio calls the provider's tx_begin after keying), false on
+// the flat paths, where the sample pull starts it
+bool radio_ysf_tx_air(void);
 // Every radio poll: received samples to the engine, the view kept. True when the view changed
 bool radio_ysf_poll(uint32_t now_ms);
+// The chip's receive framer (air_framer.c): syncs, misses, locks, rejects, frames handed to the mode
+void radio_ysf_framer_stats(uint16_t out[5]);
+// Whether the chip's framer holds a sync now: a locked one that stops seeing syncs ends the receiver's call
+bool radio_ysf_framer_locked(void);
 // A transmission is being received (the squelch's place: RS_RX while true)
 bool radio_ysf_receiving(void);
 bool radio_ysf_playing(void);

@@ -66,6 +66,7 @@ _Static_assert(sizeof(air_softmodem_t) + AIR_SM_ALIGN - 1u <= sizeof(eng.txq),
 	((air_softmodem_t *)(void *)(((uintptr_t)(void *)eng.txq + AIR_SM_ALIGN - 1u) & ~(uintptr_t)(AIR_SM_ALIGN - 1u)))
 #define AIR		(&((air_mem_t *)(void *)eng.evq)->a)
 static volatile bool air_on;
+static volatile uint32_t air_opens, air_closes;	// the provider's own count: who closed it, for the debug link
 static air_event_cb_t air_cb;
 static void *air_ctx;
 #define AIR_ON()	air_on
@@ -974,6 +975,9 @@ static bool air_open(const air_profile_t *p, air_event_cb_t cb, void *ctx)
 	air_take();
 	bool ok = hrc6000_air_open(AIR, p, air_event, NULL);
 	air_on = ok;
+	if (ok) {
+		air_opens++;
+	}
 	unlock(NULL);
 	if (!ok) {
 		eng.txq_head = eng.txq_tail = 0;
@@ -991,6 +995,7 @@ static void air_close(void)
 	if (!air_on) {
 		return;
 	}
+	air_closes++;
 	bool was_tx = hrc6000_air_tx_active(AIR);
 	lock(NULL);
 	hrc6000_air_close(AIR, active);
@@ -1080,7 +1085,9 @@ static bool air_rx_counts(air_rx_counts_t *c)
 	}
 	*c = (air_rx_counts_t){ .records = AIR->st.records, .synced = AIR->st.synced, .halves = AIR->st.halves,
 				.overruns = AIR->st.overruns + AIR->st.rx_overflow, .chunks = AIR->st.chunks,
-				.copy_restarts = AIR->st.copy_restarts, .lost_ms = air_lost.ms };
+				.copy_restarts = AIR->st.copy_restarts, .lost_ms = air_lost.ms,
+				.tx_state = (uint8_t)AIR->tx, .tx_queue = (uint8_t)hrc6000_air_tx_space(AIR),
+				.opens = air_opens, .closes = air_closes };
 	memcpy(c->lost_regs, air_lost.regs, sizeof c->lost_regs);
 	unlock(NULL);
 	return true;

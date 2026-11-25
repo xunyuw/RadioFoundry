@@ -12,11 +12,13 @@
 #include "radio/mic_gain.h"
 #include "audio/miclimit/miclimit.h"
 #include "radio/radio_flat.h"
+#include "settings/settings.h"
 #include "codeplug/codeplug_modes.h"
 #include "ysf/ysf_engine.h"
 #include "ysf/ysf_codeplug.h"
 #if CONFIG_YSF_AIR
 #include "ysf/ysf_air.h"
+#include "air/air_syms.h"	// air_sym_get: the framer hands packed dibits
 #include "air/air_framer.h"
 #include "air/air_softmodem.h"
 #endif
@@ -195,6 +197,18 @@ static void station_load(void)
 	if (blank) {
 		codeplug_radio_name(name);
 		ysf_field_set(st.call, YSF_CALLSIGN_LEN, name);
+	}
+	// The radio's own DG-IDs over the record's (Settings > that channel's quick tile): 0xFF in settings means the
+	// record's, as an older settings record reads
+	settings_t *st_settings = settings_begin();
+	uint8_t tx_dg = st_settings->ysf_tx_dgid;
+	uint8_t rx_dg = st_settings->ysf_rx_dgid;
+	settings_end(0);
+	if (tx_dg <= 99) {
+		chan.tx_dgid = tx_dg;
+	}
+	if (rx_dg <= 99) {
+		chan.rx_dgid = rx_dg;
 	}
 	ysf_csd_init(&csd_tx, NULL, NULL);
 	memcpy(csd_tx.src, st.call, YSF_CALLSIGN_LEN);
@@ -725,8 +739,18 @@ static bool air_ok(void)
 }
 #endif
 
-// Which route this build and board run: the flat tap where it has one (dm32), else the chip's air interface
+// Which route this build and board run: the flat tap where it has one, else the chip's air interface
 static bool use_air;
+
+bool radio_ysf_fits(void)
+{
+	tap = board.audio_tap;
+#if CONFIG_YSF_AIR
+	return path_ok() || air_ok();
+#else
+	return path_ok();
+#endif
+}
 
 static void route_pick(void)
 {
@@ -762,27 +786,123 @@ static void rx_flat_off(void)
 // --- the chip's air interface (ysf-modem.md 1.7) ---
 
 static bool air_on;
+static bool air_tx_fill(void);
+static uint32_t air_tx_ms;	// when the release began waiting for TX_DONE
+static bool air_tx;		// the chip's route is transmitting (its 144-symbol blocks are being queued)
+static bool air_tx_end;		// the last block is queued: the provider's TX_DONE ends it
 
 static void air_dibits(void *ctx, const uint8_t *d, uint16_t n)
 {
 	(void)ctx;
-	ysf_engine_rx_dibits(eng, d, n);	// the frame layer's own search and FICH check do the rest
+	// d is packed (four dibits a byte, air_syms.h), n the symbol count the framer took: unpack before the frame
+	// layer, which reads one dibit a byte. Passing the packed bytes with a symbol count read past the end of the
+	// framer's buffer (the last frames' symbols), so the layer found no sync in a stream the framer had locked
+	static uint8_t syms[YSF_FRAME_DIBITS];
+	uint16_t i;
+	for (i = 0; i < n && i < YSF_FRAME_DIBITS; i++) {
+		syms[i] = air_sym_get(d, i);
+	}
+	ysf_engine_rx_dibits(eng, syms, i);	// the frame layer's own search and FICH check do the rest
 }
 
 static void air_lost(void *ctx)
 {
-	(void)ctx;	// the frame layer closes the squelch on its own lost sync
+	(void)ctx;
+	// The chip's framer lost its sync: the receiver's call ends here. Its own four missed syncs never come while the
+	// framer hands no more frames, so a call that ended on air would hold the squelch open for good
+	ysf_engine_rx_lost(eng);
 }
 
 static void air_event(const air_event_t *ev, void *ctx)
 {
 	(void)ctx;
 	if (ev->kind == AIR_EV_RX && ev->chunk != NULL) {
+		stats.rx_chunks++;
+		stats.rx_syms += ev->chunk->nsyms;
 		// A chip provider hands its records; a copy provider hands the copy's samples already turned into symbols
 		air_framer_rx(&area->air_fr, ev->chunk);
 	}
+	if (ev->kind == AIR_EV_TX_SPACE && air_tx && !air_tx_end) {
+		// Room again: the next blocks go out (the radio task's poll asks, but a chunk leaving mid-over is the
+		// provider telling us now)
+		air_tx_fill();
+	}
+	if (ev->kind == AIR_EV_TX_UNDERRUN) {
+		stats.tx_underruns++;
+	}
+	if (ev->kind == AIR_EV_TX_DONE) {
+		// The radio unkeys in ysf_service, as the flat route's pull does
+		air_tx = false;
+		air_tx_end = false;
+	}
 }
 
+// Queue every block the provider has room for. The engine's 144-symbol block is the provider's chunk, so a block
+// goes straight in. False when the transmission's last block has been queued
+static bool air_tx_fill(void)
+{
+	const hal_air_t *air = board.air;
+	uint8_t block[YSF_PHY_BLOCK_BYTES];
+
+	if (!air_tx || air_tx_end || air == NULL) {
+		return false;
+	}
+	view.tx_space = air->tx_space();	// a chunk count: 0 while the provider holds no session
+	// No room: the next TX_SPACE event or the poll comes back (a chunk is one block, so this waits for one)
+	while (air_framer_tx_space(&area->air_fr, air) >= YSF_PHY_BLOCK_SYMS) {
+		bool got = ysf_engine_tx_block(eng, block);
+		if (!got) {
+			// The terminator has gone: the block that carried it is the last
+			air_framer_tx(&area->air_fr, air, block, 0, YSF_PHY_BLOCK_SYMS);
+			air_framer_tx_finish(&area->air_fr, air);
+			air_tx_end = true;
+			stats.tx_blocks++;
+			return false;
+		}
+		air_framer_tx(&area->air_fr, air, block, 0, YSF_PHY_BLOCK_SYMS);
+		stats.tx_blocks++;
+	}
+	return true;
+}
+
+// PTT: the chip's route queues its blocks and the radio task calls the provider's tx_begin once enough is in
+static bool air_tx_start(void)
+{
+	const hal_air_t *air = board.air;
+
+	if (!air_on || air == NULL || eng == NULL) {
+		return false;
+	}
+	// The provider's side as it stands: its room, and where its own transmit state machine is. A session this file
+	// believes open can be one the provider closed (the two keep their own flag), and a session left mid-transmission
+	// refuses every chunk: both read 0 here, so open it again rather than queue into nothing
+	if (air->tx_space() == 0) {
+		air->close();
+		if (!air->open(&ysf_air_mode.profile, air_event, NULL)) {
+			return false;
+		}
+	}
+	air_framer_tx_start(&area->air_fr, AIR_FIT_TX | AIR_FIT_RX);
+	air_tx = true;
+	air_tx_end = false;
+	air_tx_fill();		// no room yet is fine: the provider's TX_SPACE event or the poll comes back
+	return true;
+}
+
+// PTT up: the terminator still has to go, then the last block is the transmission's end
+static void air_tx_release(void)
+{
+	if (!air_tx) {
+		return;
+	}
+	ysf_engine_tx_stop(eng);	// the frame being sent is finished, then the terminator
+	air_tx_fill();
+	air_tx_ms = 0;			// the first poll after the release starts the drain's clock
+}
+
+// Start the chip's session. air_on follows what the provider took, never the other way round: the provider keeps its
+// own flag and air_open refuses while that one is set, so a close this file made without the provider would leave a
+// session the next open can never take (modem-hrc6000.md 10.6, dmr_glue.c's air_open)
 static bool air_start(void)
 {
 	const hal_air_t *air = board.air;
@@ -795,10 +915,18 @@ static bool air_start(void)
 	}
 	static const ysf_air_rx_t arx = { air_dibits, air_lost, NULL };
 	air_framer_init(&area->air_fr, &ysf_air_mode, (void *)&arx, area->air_hard, area->air_soft,
-			YSF_PHY_BLOCK_SYMS * 4u);
+			YSF_FRAME_DIBITS);
+	// A fresh session every start: the provider's transmit machine is put back to receive by its close, and one left
+	// mid-transmission by an abort would refuse every chunk of the next over
+	air->close();
 	if (!air->open(&ysf_air_mode.profile, air_event, NULL)) {
-		view.fault = RYSF_RX_REFUSED;
-		return false;
+		// A session nobody holds open (a start that failed after the provider opened) or one this file lost track
+		// of: close once and take it again. The second failure is real and is reported
+		air->close();
+		if (!air->open(&ysf_air_mode.profile, air_event, NULL)) {
+			view.fault = RYSF_RX_REFUSED;
+			return false;
+		}
 	}
 	air_on = true;
 	return true;
@@ -806,10 +934,10 @@ static bool air_start(void)
 
 static void air_stop(void)
 {
-	if (air_on) {
+	if (board.air != NULL) {
 		board.air->close();
-		air_on = false;
 	}
+	air_on = false;
 }
 #endif
 
@@ -826,6 +954,11 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 	if (running) {
 		radio_ysf_stop();
 	}
+#if CONFIG_YSF_AIR
+	else if (air_on) {
+		air_stop();	// a start that failed left the session open: close it before this one opens its own
+	}
+#endif
 	if (number == 0 || !ysf_chan_load(number, ch, &chan)) {
 		ysf_chan_decode(NULL, 0, &chan);	// the defaults: ALL, DG-ID 0, wide
 	}
@@ -834,9 +967,12 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 	view.codec = codec_ok();
 	tap = board.audio_tap;
 	route_pick();
+	// Which route this start has: 0 none fits, 1 the flat tap, 2 the chip's air interface
+	view.route = path_ok() ? 1u : (use_air ? 2u : 0u);
 	cal_load();
 	station_load();
 	running = true;
+	view.steps = 1;				// the mode is running, the route picked
 	if (!path_ok() && !use_air) {
 		view.fault = RYSF_NO_PATH;
 		view_dirty = true;
@@ -844,6 +980,7 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 	}
 	area = radio_mode_ram_take(RADIO_MODE_RAM_YSF, sizeof *area);
 	eng = area != NULL ? &area->eng : NULL;
+	view.steps = area != NULL ? 2 : 1;	// 2: the mode area is ours
 	if (eng == NULL) {
 		// D-STAR still holds the area: the core starts a mode only after stopping the other, so this is a bug in
 		// that order. Refused rather than taken, since D-STAR's transmit interrupt may still be pulling from it
@@ -859,6 +996,7 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 #endif
 	rx_queue_reset();
 	engine_rx();
+	view.steps = 3;				// the engine is listening
 #if CONFIG_YSF_AIR
 	if (use_air) {
 		if (!air_start()) {
@@ -876,6 +1014,7 @@ bool radio_ysf_start(uint16_t number, const channel_t *ch, uint32_t now_ms)
 		rx_flat_on();
 	}
 	stream_start();
+	view.steps = 4;				// the chip's session (or the flat tap) is up
 	view_dirty = true;
 	return rx_on
 #if CONFIG_YSF_AIR
@@ -917,6 +1056,34 @@ void radio_ysf_stop(void)
 bool radio_ysf_running(void)
 {
 	return running;
+}
+
+// The chip's receive framer (air_framer.c): the syncs it found, its locks and the frames it handed the mode, plus
+// whether it holds a sync now. A lock that ends is what tells the receiver the signal went (air_lost), so a call on
+// air ends as one on a symbol path does
+void radio_ysf_framer_stats(uint16_t out[5])
+{
+#if CONFIG_YSF_AIR
+	const air_framer_t *fr = area != NULL ? &area->air_fr : NULL;
+	if (fr != NULL) {
+		out[0] = fr->stats.syncs;
+		out[1] = fr->misses;
+		out[2] = fr->stats.locks;
+		out[3] = fr->stats.rejects;
+		out[4] = fr->stats.frames;
+		return;
+	}
+#endif
+	memset(out, 0, 5 * sizeof(out[0]));
+}
+
+bool radio_ysf_framer_locked(void)
+{
+#if CONFIG_YSF_AIR
+	return area != NULL && air_framer_locked(&area->air_fr);
+#else
+	return false;
+#endif
 }
 
 bool radio_ysf_poll(uint32_t now_ms)
@@ -962,13 +1129,29 @@ uint8_t radio_ysf_tx_check(void)
 	return TXDENY_NONE;
 }
 
+bool radio_ysf_tx_air(void)
+{
+#if CONFIG_YSF_AIR
+	return air_tx;
+#else
+	return false;
+#endif
+}
+
 bool radio_ysf_tx_start(uint32_t now_ms)
 {
 	(void)now_ms;
 	if (!running || eng == NULL) {
 		return false;	// tx_check refuses these first; the engine area is not ours to write without the take
 	}
-	rx_flat_off();
+#if CONFIG_YSF_AIR
+	bool air_route = use_air;
+#else
+	bool air_route = false;
+#endif
+	if (!air_route) {
+		rx_flat_off();
+	}
 	rx_fold();
 	STORE(tx_tail, LOAD(tx_head));
 	ysf_tx_config_t cfg;
@@ -996,9 +1179,34 @@ bool radio_ysf_tx_start(uint32_t now_ms)
 	tx_released = false;
 	tx_done = false;
 	tx_done_ms = tx_drain_ms = 0;
-	if (!ysf_engine_tx_start(eng, &path, &cfg)) {
+#if CONFIG_YSF_AIR
+	// The chip's route hands the engine's 144-symbol blocks straight to the provider: no sample rate, so the engine
+	// keeps its frames and skip the C4FM modulator (whose state shares the union with the framer it would overwrite)
+	ysf_path_t air_path = path;
+	if (use_air) {
+		air_path.rate = 0;
+		air_path.tx_amp = 0;
+		air_path.tx_invert = false;	// the profile's dibit order is the air's (hal_air.h): no path polarity
+		air_path.rx_invert = false;
+	}
+	const ysf_path_t *txp = use_air ? &air_path : &path;
+#else
+	const ysf_path_t *txp = &path;
+#endif
+	if (!ysf_engine_tx_start(eng, txp, &cfg)) {
 		return false;
 	}
+#if CONFIG_YSF_AIR
+	if (air_route) {
+		// The engine is transmitting now: the chip's route queues its blocks here, and ysf_ptt_down calls the
+		// provider's tx_begin once the radio has keyed. tx_on too: the mic callback (tx_block) encodes only while it
+		// is set, and the audio stream runs for as long as the mode does, so without it no frame is ever encoded and
+		// every pull sends the silence frame
+		tx_on = true;
+		stats.tx_overs++;
+		return air_tx_start();
+	}
+#endif
 	tx_on = true;
 	if (!tap->fm_tx_inject(tx_pull, AUDIO_TAP_FLAT)) {
 		tx_on = false;
@@ -1010,6 +1218,12 @@ bool radio_ysf_tx_start(uint32_t now_ms)
 
 void radio_ysf_tx_release(void)
 {
+#if CONFIG_YSF_AIR
+	if (air_tx) {
+		air_tx_release();	// the terminator, then the provider's TX_DONE ends it
+		return;
+	}
+#endif
 	if (tx_on) {
 		tx_released = true;	// the pull stops the transmitter once the queue is played out
 	}
@@ -1017,6 +1231,29 @@ void radio_ysf_tx_release(void)
 
 bool radio_ysf_tx_done(uint32_t now_ms)
 {
+#if CONFIG_YSF_AIR
+	if (use_air) {
+		// The chip's route: the provider's TX_DONE clears air_tx, after the last block has left the air. Waiting for it
+		// without a bound holds the carrier when the provider never reports it (a queue that never drained, a chip
+		// reset under the session): past the longest the queue and the terminator can take, stop it here
+		if (air_tx) {
+			air_tx_fill();	// the poll's chance to keep the queue fed
+			if (air_tx_ms == 0) {
+				air_tx_ms = now_ms != 0 ? now_ms : 1;
+			}
+			if ((uint32_t)(now_ms - air_tx_ms) < RADIO_YSF_DRAIN_MS) {
+				return false;
+			}
+			if (board.air != NULL) {
+				board.air->tx_abort();
+			}
+			air_tx = false;
+			air_tx_end = false;
+			air_tx_ms = 0;
+		}
+		return true;
+	}
+#endif
 	// Nothing on: done, as D-STAR answers. A mode restarted under the core's RS_TX (a tune in mid-transmission) has
 	// nothing on; false here would leave the core keyed with nothing but the time-out to end it
 	if (!tx_on) {
@@ -1054,6 +1291,16 @@ void radio_ysf_tx_abort(void)
 	// Cleared with the pull stopped, as D-STAR's abort does. Left set, a stop in mid-transmission (radio_ysf_stop
 	// aborts) carried it into the next start, whose poll then read nothing from the receiver until the next over
 	tx_on = false;
+#if CONFIG_YSF_AIR
+	// The chip's route: the queue and the PA are the provider's. Left set here, air_tx would keep tx_fill queueing
+	// into a session nobody follows and radio_ysf_tx_done waiting on a TX_DONE that an abort never sends
+	if (air_tx && board.air != NULL) {
+		board.air->tx_abort();
+	}
+	air_tx = false;
+	air_tx_end = false;
+	air_tx_ms = 0;
+#endif
 }
 
 void radio_ysf_rx_again(uint32_t now_ms)
@@ -1063,12 +1310,32 @@ void radio_ysf_rx_again(uint32_t now_ms)
 		tap->fm_tx_inject(NULL, AUDIO_TAP_FLAT);
 	}
 	tx_on = false;
+#if CONFIG_YSF_AIR
+	// The chip's route: a transmission the caller gave up on leaves blocks queued and the PA keyed until the
+	// provider's abort, and the session has to be receiving again for the next over (a chip provider puts its own
+	// receive set-up back in tx_stop, so the session itself stays open)
+	if (air_tx && board.air != NULL) {
+		board.air->tx_abort();
+	}
+	air_tx = false;
+	air_tx_end = false;
+	air_tx_ms = 0;
+#endif
 	if (!running || eng == NULL) {
 		return;		// not started, or started without a path or the area: nothing to receive with
 	}
 	rx_queue_reset();
 	engine_rx();
-	rx_flat_on();
+#if CONFIG_YSF_AIR
+	if (use_air) {
+		if (board.air != NULL) {
+			board.air->rx_restart();
+		}
+	} else
+#endif
+	{
+		rx_flat_on();
+	}
 	view_dirty = true;
 }
 

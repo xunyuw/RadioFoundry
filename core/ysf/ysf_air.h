@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 The RadioFoundry Authors
 // Fusion's air mode (docs/spec/ysf-modem.md 1.7): the profile a framer uses for a chip's FM copy, and the two hooks
-// that carry its frames to the frame layer. A board with the flat FM paths (dm32) does not need this: it runs the
+// that carry its frames to the frame layer. A board with the flat FM paths does not need this: it runs the
 // software modem on the discriminator samples (ysf_engine_rx). A board with only the chip's copy (the HR_C6000 ones)
 // receives through air_framer + air_softmodem, and this is the mode it registers.
 #ifndef RFOUNDRY_YSF_AIR_H

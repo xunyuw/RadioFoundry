@@ -49,6 +49,16 @@ void ysf_engine_rx_dibits(ysf_engine_t *e, const uint8_t *d, size_t n)
 	}
 }
 
+// The signal is gone under the receiver (a chip's framer lost its sync): a call in progress ends as lost. Without it a
+// framer that stops handing frames leaves the receiver in its call for good, since its own four missed syncs need
+// symbols it no longer sends
+void ysf_engine_rx_lost(ysf_engine_t *e)
+{
+	if (e->mode == YSF_ENGINE_RX) {
+		ysf_rx_lost(&e->u.rx.fr);
+	}
+}
+
 // The transmitter's dibits with the path's polarity: inverting the levels flips the first bit of each dibit
 static int tx_pull(void *ctx)
 {

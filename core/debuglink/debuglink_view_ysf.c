@@ -16,17 +16,24 @@ void debuglink_view_ysf(const radio_view_t *v, dl_text_t *t)
 	const radio_ysf_view_t *y = &v->ysf;
 	radio_ysf_stats_t s;
 	radio_ysf_stats(&s);
-	dl_text(t, "ysf.built=1\nysf.on=%u\nysf.fault=%s\nysf.codec=%u\nysf.rx=%u\nysf.playing=%u\n", y->on,
-		y->fault < 4 ? faults[y->fault] : "?", y->codec, y->rx, y->playing);
+	dl_text(t, "ysf.built=1\nysf.on=%u\nysf.fault=%s\nysf.route=%u\nysf.steps=%u\nysf.tx_space=%u\nysf.codec=%u\nysf.rx=%u\nysf.playing=%u\n", y->on,
+		y->fault < 4 ? faults[y->fault] : "?", y->route, y->steps, y->tx_space, y->codec, y->rx, y->playing);
 	dl_text(t, "ysf.mode=%s\nysf.dgid=%u\nysf.muted=%u\nysf.narrow=%u\nysf.src=%s\nysf.dest=%s\nysf.up=%s\nysf.down=%s\n",
 		y->mode < 5 ? modes[y->mode] : "?", y->dgid, y->muted, y->narrow, y->src, y->dest, y->up, y->down);
+	// The chip's receive route: the symbols in, then the framer's own search (air_framer.c). A locked framer that stops
+	// seeing syncs is what tells the receiver the signal went, so a call ends on air as it does on a symbol path
+	dl_text(t, "ysf.rx_chunks=%u\nysf.rx_syms=%u\nysf.tx_blocks=%u\n", (unsigned)s.rx_chunks, (unsigned)s.rx_syms,
+		(unsigned)s.tx_blocks);
+	uint16_t fs[5];
+	radio_ysf_framer_stats(fs);
+	dl_text(t, "ysf.fr_syncs=%u\nysf.fr_locks=%u\nysf.fr_frames=%u\nysf.fr_locked=%u\n", (unsigned)fs[0],
+		(unsigned)fs[2], (unsigned)fs[4], radio_ysf_framer_locked() ? 1u : 0u);
 	dl_text(t, "ysf.tx_src=%s\nysf.tx_dest=%s\nysf.tx_dgid=%u\nysf.rx_dgid=%u\nysf.no_call=%u\n", y->tx_src,
 		y->tx_dest, y->tx_dgid, y->rx_dgid, y->no_call);
 	// Voice FR: whether this build plays and sends it, and whether PTT on this channel sends it (ysf-modem.md 4.1)
 	dl_text(t, "ysf.vw_built=%u\nysf.tx_vw=%u\n", (unsigned)CONFIG_YSF_VW, y->tx_vw);
-	dl_text(t, "ysf.syncs=%u\nysf.late=%u\nysf.fich_good=%u\nysf.fich_bad=%u\nysf.csd_good=%u\nysf.csd_bad=%u\n",
-		(unsigned)s.syncs, (unsigned)s.late, (unsigned)s.fich_good, (unsigned)s.fich_bad, (unsigned)s.csd_good,
-		(unsigned)s.csd_bad);
+	dl_text(t, "ysf.syncs=%u\nysf.fich_good=%u\nysf.fich_bad=%u\nysf.csd_good=%u\nysf.csd_bad=%u\n",
+		(unsigned)s.syncs, (unsigned)s.fich_good, (unsigned)s.fich_bad, (unsigned)s.csd_good, (unsigned)s.csd_bad);
 	dl_text(t, "ysf.order_all=%u\nysf.sync_bits=%u\nysf.sync_errors=%u\nysf.ppm=%d\nysf.offset_hz=%d\nysf.rx_invert=%u\n",
 		(unsigned)s.order_all, (unsigned)s.sync_bits, (unsigned)s.sync_errors, (int)s.ppm, (int)s.offset_hz,
 		s.rx_invert);

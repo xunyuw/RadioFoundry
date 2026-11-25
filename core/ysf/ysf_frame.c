@@ -602,3 +602,9 @@ void ysf_rx_dibit(ysf_rx_t *r, uint8_t dibit)
 	}
 	rx_bits(r, dibit & 3u, (dibit & 2u) ? 4 : -4, (dibit & 1u) ? 4 : -4);
 }
+
+void ysf_rx_lost(ysf_rx_t *r)
+{
+	rx_end(r, YSF_END_LOST);
+	r->misses = 0;
+}

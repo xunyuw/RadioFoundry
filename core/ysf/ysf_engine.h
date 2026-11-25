@@ -68,6 +68,9 @@ static inline void ysf_engine_rx_voice_fr(ysf_engine_t *e, ysf_voice_fr_t fn)
 void ysf_engine_rx(ysf_engine_t *e, const int16_t *s, size_t n);
 // Dibits a modem chip decided (in RX), one per byte
 void ysf_engine_rx_dibits(ysf_engine_t *e, const uint8_t *d, size_t n);
+// The signal went away under the receiver: a call in progress ends (ysf_end_t YSF_END_LOST) and the search starts
+// over. A chip's framer calls this when it loses its sync; a symbol path's own missed syncs get there first
+void ysf_engine_rx_lost(ysf_engine_t *e);
 // The receiver's state and counters (for the screens and the debug link)
 static inline const ysf_rx_t *ysf_engine_receiver(const ysf_engine_t *e)
 {

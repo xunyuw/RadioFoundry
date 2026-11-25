@@ -65,7 +65,7 @@ static const char *state_key(uint8_t s)
 // The channel's mode (radio_mode_t) as the view names it
 static const char *mode_key(uint8_t m)
 {
-	static const char *const names[] = { "fm", "dmr", "p25", "nxdn" };
+	static const char *const names[] = { "fm", "dmr", "p25", "nxdn", "ysf" };
 	return m < sizeof(names) / sizeof(names[0]) ? names[m] : "?";
 }
 
@@ -171,6 +171,12 @@ static void core_section(const radio_view_t *v, dl_text_t *t)
 	dl_text(t, "req_handled=%u\nreq_dropped=%u\nch_read_errors=%u\n", (unsigned)handled, (unsigned)dropped,
 		(unsigned)codeplug_channel_errors());
 	dl_text(t, "serial=%u\n", (unsigned)radio_view_serial());
+}
+
+// Its own section: in the core one these four lines pushed the reply past DL_REPLY_MAX and the keys after them were
+// dropped (the radio answered truncated=1, so a tool read no table at all)
+static void cjk_section(dl_text_t *t)
+{
 #if CONFIG_CJK_GLYPHS
 	// Which CJK table this build was made with, and where its glyphs are (addr 0: in this image, so there is no data
 	// flash row to compare). A tool compares the index's hash with the one the font it is about to write was built with,
@@ -178,6 +184,8 @@ static void core_section(const radio_view_t *v, dl_text_t *t)
 	dl_text(t, "font.glyphs=%u\nfont.in_flash=%u\nfont.addr=0x%X\nfont.index_hash=0x%08X\n",
 		(unsigned)cjk_font_count, (unsigned)(CONFIG_CJK_FONT_IN_FLASH ? 1 : 0), (unsigned)cjk_font_addr,
 		(unsigned)cjk_font_index_hash);
+#else
+	dl_text(t, "font.glyphs=0\n");
 #endif
 }
 
@@ -610,7 +618,7 @@ static const char *const section_names[DL_VIEW_COUNT] = { "core", "channel", "dm
 						  "dmr_data_stats", "roam", "aprs", "aprs_set", "dmr_ip", "net", "snmp", "usrp",
 						  "sfr", "tasks", "crash", "watchdog", "reset", "air", "net_svc",
 						  "net_link", "cps", "board", "audio", "t3", "t3_svc", "t3_roam", "voice_cap", "t3_msg",
-						  "t3_ra", "p25", "p25_trunk", "nxdn", "dstar", "ysf" };
+						  "t3_ra", "p25", "p25_trunk", "nxdn", "dstar", "ysf", "cjk" };
 
 const char *debuglink_view_name(uint8_t section)
 {
@@ -753,6 +761,9 @@ void debuglink_view_section(uint8_t section, const radio_view_t *v, dl_text_t *t
 		break;
 	case DL_VIEW_YSF:
 		debuglink_view_ysf(v, t);
+		break;
+	case DL_VIEW_CJK:
+		cjk_section(t);
 		break;
 	case DL_VIEW_USRP:
 #if CONFIG_NET_USRP
