@@ -1405,8 +1405,12 @@ static void quick_close_editor(void)
 		return;		// the editor stays open on what was typed
 	if (kind == QT_CC && ui_st.quick_edit && !ui_svc_dmr_color_code(ui_st.cc_edit))
 		ui_toast(TR(WHY_COLOR_CODE_NOT_IN_BUILD, "Color code: not in this build"));
+#if CONFIG_YSF
+	// The same condition as ui_svc_ysf_dgid's own: the tile is not drawn without Fusion, but the editor's close runs
+	// for whatever tile was open when the mode changed under it
 	if (kind == QT_DGID && ui_st.quick_edit && !ui_svc_ysf_dgid(ui_st.dgid_edit))
 		ui_toast(TR(WHY_DGID_NOT_IN_BUILD, "DG-ID: not in this build"));
+#endif
 	if (kind == QT_BRIGHTNESS)
 		ui_svc_setting_set(UI_SET_BRIGHTNESS, ui_st.brightness);
 	ui_st.quick_edit = false;
