@@ -86,7 +86,7 @@ function checkCall(v, key, max, problem) {
 }
 
 export const ysfKind = {
-	id: 6,
+	id: 7,
 	feature: "YSF",
 	systemType: null,
 	contacts: false,

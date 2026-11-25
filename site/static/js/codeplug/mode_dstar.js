@@ -89,7 +89,7 @@ function checkCall(v, key, max, problem) {
 const callField = (key, label, help) => ({ key, label, type: "text", ...(help ? { help } : {}) });
 
 export const dstarKind = {
-	id: 5,
+	id: 6,
 	feature: "DSTAR",
 	systemType: null,
 	contacts: false,

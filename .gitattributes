@@ -9,6 +9,12 @@
 Makefile	text eol=lf
 *.mk		text eol=lf
 
+# The site's JavaScript: its tests read these files as text and match exact source lines (site/tests/buildfit.test.mjs
+# and the rest), so a CRLF checkout fails them on a machine where nothing is wrong
+*.js		text eol=lf
+*.mjs		text eol=lf
+*.json		text eol=lf
+
 # Everything else may take the platform's line ends: the editors here write CRLF and nothing in the build reads those
 # files a line at a time
 *		text=auto

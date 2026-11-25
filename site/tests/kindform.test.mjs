@@ -46,7 +46,7 @@ const { MODE_KEY, decodeTag, syncModes } = await import("../static/js/codeplug/c
 const { decodeArea, getValue } = await import("../static/js/codeplug/kv.js");
 
 const t = (k) => k;
-// what a DM-32 build with both modes reports (core/hostlink/build_info.c), the radio connected
+// what a build with both modes reports (core/hostlink/build_info.c), the radio connected
 const FEATURES = "FM,DMR,DSTAR,YSF";
 const ascii = (b) => String.fromCharCode(...b);
 
@@ -90,8 +90,8 @@ function stored(mode) {
 }
 
 const KINDS = {
-	dstar: { kind: 5, box: "k5.ur", defaults: { "k5.ur": "CQCQCQ", "k5.rpt1": "" }, params: { ur: "CQCQCQ", rpt1: "", rpt2: "", viaRepeater: false }, stored: [0, 8, "CQCQCQ  "] },
-	fusion: { kind: 6, box: "k6.dest", defaults: { "k6.dest": "ALL", "k6.txDgid": "0", "k6.rxDgid": "0" }, params: { dest: "ALL", txDgid: 0, rxDgid: 0, narrow: false, voice: 0 }, stored: [0, 10, "ALL       "] },
+	dstar: { kind: 6, box: "k6.ur", defaults: { "k6.ur": "CQCQCQ", "k6.rpt1": "" }, params: { ur: "CQCQCQ", rpt1: "", rpt2: "", viaRepeater: false }, stored: [0, 8, "CQCQCQ  "] },
+	fusion: { kind: 7, box: "k7.dest", defaults: { "k7.dest": "ALL", "k7.txDgid": "0", "k7.rxDgid": "0" }, params: { dest: "ALL", txDgid: 0, rxDgid: 0, narrow: false, voice: 0 }, stored: [0, 10, "ALL       "] },
 };
 const ORDERS = {
 	"mode, then frequency": (f, k) => {
@@ -168,6 +168,6 @@ test("the kinds offered follow the radio's feature list: none it doesn't name, u
 	const { m, c } = stored("fm");
 	const mode = (features) => columns("channels", m, t, { features }).find((x) => x.key === "mode").options(c).map(([v]) => v);
 	assert.deepEqual(mode("FM,DMR"), ["fm", "dmr"]);
-	assert.deepEqual(mode(FEATURES), ["fm", "dmr", "k5", "k6"]);
-	assert.deepEqual(mode(null), ["fm", "dmr", "k1", "k2", "k3", "k4", "k5", "k6"], "no radio: every kind");
+	assert.deepEqual(mode(FEATURES), ["fm", "dmr", "k6", "k7"]);
+	assert.deepEqual(mode(null), ["fm", "dmr", "k1", "k2", "k3", "k4", "k5", "k6", "k7"], "no radio: every kind");
 });

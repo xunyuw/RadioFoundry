@@ -7922,8 +7922,11 @@ static void test_p25_stored(void)
 	p25_view_text(buf, sizeof buf);
 	CHECK(strstr(buf, "p25.run.rx_tgid=0\n") != NULL);
 
-	// No mode change for now on a channel of a kind: its mode is the kind's
+	// A mode change on a channel of a kind is the temporary one every channel allows (channel-modes.md 6): FM while
+	// it stands, the P25 engine down, and the channel's own P25 back when it is cleared
 	req(RREQ_MODE, RADIO_MODE_FM);
+	CHECK(sm.view.ch.mode == RADIO_MODE_FM && !radio_p25_running() && (sm.view.temp & RADIO_TEMP_MODE));
+	req(RREQ_CLEAR_TEMP, 0);
 	CHECK(sm.view.ch.mode == RADIO_MODE_P25 && radio_p25_running() && !(sm.view.temp & RADIO_TEMP_MODE));
 	// Receive only from the tag: PTT refused as on any channel
 	chans[3].rx_only = true;
@@ -7973,18 +7976,27 @@ static void test_p25_stored(void)
 	run(20);
 	memset(&p25_saved, 0, sizeof p25_saved);
 	channel_t ed = sm.view.ch;
-	CHECK(ed.mode == RADIO_MODE_P25 && ed.kind == CODEPLUG_KIND_NONE);
-	CHECK(ui_svc_write_channel(6, &ed, 0));
+	CHECK(ed.mode == RADIO_MODE_P25 && ed.kind == CODEPLUG_KIND_P25);
+	// A channel of the kind carries its block: the plain write leaves a kinded record alone (there is no tag to write),
+	// so the editor's air form is the one that saves it
+	ui_air_conv_t conv0 = { .p25 = { 0x2B0, 0x2B1, P25_SQUELCH_SELECTIVE } };
+	CHECK(ui_svc_write_channel_air(6, &ed, 0, &conv0));
 	storage_job_poll();
 	CHECK(p25_saved.number == 6 && p25_saved.conv.rx_nac == 0x2B0 && p25_saved.conv.tx_nac == 0x2B1);
-	CHECK(p25_saved.conv.squelch == P25_SQUELCH_SELECTIVE && p25_saved.ch.contact == 3 && p25_saved.ch.dmo);
-	// No stored contact for the talk group: none (talk group 1); automatic talkaround, normal squelch
+	// A channel of the kind is saved as the editor's form sends it: its block and its record, not the radio's settings
+	// merged over them (that merge is the plain channel's, p25_save_now)
+	CHECK(p25_saved.conv.squelch == P25_SQUELCH_SELECTIVE && p25_saved.ch.contact == ed.contact &&
+	      p25_saved.ch.dmo == ed.dmo);
+	// The same channel with another block and another contact: the form's, both
 	s.tx_dst = 4242;
 	s.rx_tgid = 0;
 	s.talkaround = RADIO_P25_TA_AUTO;
 	radio_req_p25_settings(&s);
 	run(20);
-	CHECK(ui_svc_write_channel(6, &ed, 0));
+	ed.contact = 0;
+	ed.dmo = false;
+	ui_air_conv_t conv1 = { .p25 = { 0x2B0, 0x2B1, P25_SQUELCH_NORMAL } };
+	CHECK(ui_svc_write_channel_air(6, &ed, 0, &conv1));
 	storage_job_poll();
 	CHECK(p25_saved.ch.contact == 0 && !p25_saved.ch.dmo && p25_saved.conv.squelch == P25_SQUELCH_NORMAL);
 	p25_defaults();
@@ -8018,7 +8030,9 @@ static void test_p25_stored(void)
 	ed = sm.view.ch;
 	CHECK(ui_svc_write_channel_air(6, &ed, 0, &air));
 	storage_job_poll();
-	CHECK(p25_saved.number == 6 && p25_saved.conv.rx_nac == 0x3C3 && p25_saved.ch.contact == 3);
+	// The contact is the record's, as the editor's form sends the record: a channel of the kind is not rebuilt from
+	// the radio's settings
+	CHECK(p25_saved.number == 6 && p25_saved.conv.rx_nac == 0x3C3 && p25_saved.ch.contact == ed.contact);
 	// A write that is no P25 channel takes no block
 	ed = chans[1];
 	p25_saved.number = 0;

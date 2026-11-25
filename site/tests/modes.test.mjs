@@ -108,28 +108,28 @@ test("D-STAR: a channel and the radio-wide record round-trip, byte for byte uned
 	const d2 = newChannel({ name: "DV Simplex", rxHz: 438625000, txHz: 438625000, rxOnly: false });
 	m.channels.push(c, d2);
 	numberAll(m);
-	setKind(m, c, 5);
-	setKind(m, d2, 5);
+	setKind(m, c, 6);
+	setKind(m, d2, 6);
 	assert.equal(c.tagTx, true, "D-STAR: transmit allowed on a new channel");
 	assert.deepEqual(d2.params, { ur: "CQCQCQ", rpt1: "", rpt2: "", viaRepeater: false });
 	c.params = { ur: "CQCQCQ", rpt1: "n0call b", rpt2: "N0CALL G", viaRepeater: true };
-	m.modeSettings[5] = { my: "N0CALL", suffix: "MOBL", msg: "Hello from the bench" };
+	m.modeSettings[6] = { my: "N0CALL", suffix: "MOBL", msg: "Hello from the bench" };
 	const img = encode(m);
 	const d = decode(img);
 	const by = (n) => d.channels.find((x) => x.name === n);
-	assert.equal(by("DV Rpt").kind, 5);
+	assert.equal(by("DV Rpt").kind, 6);
 	assert.equal(by("DV Rpt").mode, "dmr");
 	assert.equal(by("DV Rpt").rxOnly, true, "the record is the stand-in");
 	assert.equal(by("DV Rpt").tagTx, true);
 	assert.deepEqual(by("DV Rpt").params, { ur: "CQCQCQ", rpt1: "N0CALL B", rpt2: "N0CALL G", viaRepeater: true });
 	assert.deepEqual(by("DV Simplex").params, { ur: "CQCQCQ", rpt1: "", rpt2: "", viaRepeater: false });
-	assert.deepEqual(d.modeSettings[5], { my: "N0CALL", suffix: "MOBL", msg: "Hello from the bench" });
+	assert.deepEqual(d.modeSettings[6], { my: "N0CALL", suffix: "MOBL", msg: "Hello from the bench" });
 	assert.deepEqual(encode(d).bytes, img.bytes);
 	const e = area(img);
 	const tag = decodeTag(getValue(e, MODE_KEY.tag + by("DV Rpt").number - 1));
-	assert.deepEqual([tag.kind, tag.system, tag.flags], [5, 0xFF, 0x01]);
+	assert.deepEqual([tag.kind, tag.system, tag.flags], [6, 0xFF, 0x01]);
 	assert.equal(hexOf(tag.params), "4351435143512020" + "4E3043414C4C2042" + "4E3043414C4C2047" + "01");
-	assert.equal(hexOf(getValue(e, MODE_KEY.setting + 5)), "4E3043414C4C20204D4F424C48656C6C6F2066726F6D207468652062656E6368");
+	assert.equal(hexOf(getValue(e, MODE_KEY.setting + 6)), "4E3043414C4C20204D4F424C48656C6C6F2066726F6D207468652062656E6368");
 	// a block with reserved flag bits and bytes past what the module knows: an edit keeps them
 	const key = MODE_KEY.tag + by("DV Rpt").number - 1;
 	const stored = getValue(e, key);
@@ -141,7 +141,7 @@ test("D-STAR: a channel and the radio-wide record round-trip, byte for byte uned
 	assert.deepEqual([...t.params.subarray(-3)], [0x81, 0x12, 0x34]);
 	assert.equal(decodeChan(t.params).ur, "REF030CL");
 	// offered: on a radio that reports it
-	assert.deepEqual(offeredKinds(empty(), "FM,DMR,DSTAR").map((k) => k.id), [5]);
+	assert.deepEqual(offeredKinds(empty(), "FM,DMR,DSTAR").map((k) => k.id), [6]);
 });
 
 test("D-STAR validation: callsign length and characters, message, via a repeater without RPT1", () => {
@@ -165,7 +165,7 @@ test("D-STAR validation: callsign length and characters, message, via a repeater
 	const c = newChannel({ name: "DV" });
 	m.channels.push(c);
 	numberAll(m);
-	setKind(m, c, 5);
+	setKind(m, c, 6);
 	c.params = { ...c.params, rpt2: "N0*CALL" };
 	assert.ok(validate(m).some((x) => x.code === "dstar_call_chars" && x.item === c));
 	assert.ok(validate(m, { features: "FM,DMR" }).some((x) => x.code === "mode_not_in_radio" && x.item === c));
@@ -201,18 +201,18 @@ test("Fusion: a channel and the radio-wide record round-trip; validation; offere
 	const c = newChannel({ name: "C4FM Rpt", rxHz: 439412500, txHz: 431812500, rxOnly: false });
 	m.channels.push(c);
 	numberAll(m);
-	setKind(m, c, 6);
+	setKind(m, c, 7);
 	assert.equal(c.tagTx, true, "Fusion: transmit allowed on a new channel");
 	assert.deepEqual(c.params, { dest: "ALL", txDgid: 0, rxDgid: 0, narrow: false, voice: 0 }, "DN by default");
 	c.params = { dest: "g4xyz", txDgid: 20, rxDgid: 20, narrow: false, voice: 1 };
-	m.modeSettings[6] = { call: "G4XYZ", radioId: "E0123" };
+	m.modeSettings[7] = { call: "G4XYZ", radioId: "E0123" };
 	const img = encode(m);
 	const d = decode(img);
 	const back = d.channels.find((x) => x.name === "C4FM Rpt");
-	assert.equal(back.kind, 6);
+	assert.equal(back.kind, 7);
 	assert.equal(back.rxOnly, true, "the record is the stand-in");
 	assert.deepEqual(back.params, { dest: "G4XYZ", txDgid: 20, rxDgid: 20, narrow: false, voice: 1 });
-	assert.deepEqual(d.modeSettings[6], { call: "G4XYZ", radioId: "E0123" });
+	assert.deepEqual(d.modeSettings[7], { call: "G4XYZ", radioId: "E0123" });
 	assert.deepEqual(encode(d).bytes, img.bytes);
 	const tag = decodeTag(getValue(area(img), MODE_KEY.tag + back.number - 1));
 	assert.equal(hexOf(tag.params), "473458595A2020202020" + "141402", "VW: flag bit 1");
@@ -226,7 +226,7 @@ test("Fusion: a channel and the radio-wide record round-trip; validation; offere
 		[["err", "dest", "ysf_call_long", 10], ["err", "txDgid", "ysf_dgid_range", 99]]);
 	assert.deepEqual(problems((pr) => ysf.ysfKind.settings.validate({ call: "G4*XYZ", radioId: "TOOLONG" }, pr)),
 		[["err", "call", "ysf_call_chars", undefined], ["err", "radioId", "ysf_call_long", 5]]);
-	assert.deepEqual(offeredKinds(empty(), "FM,DMR,YSF").map((k) => k.id), [6]);
+	assert.deepEqual(offeredKinds(empty(), "FM,DMR,YSF").map((k) => k.id), [7]);
 	assert.ok(validate(m, { features: "FM,DMR" }).some((x) => x.code === "mode_not_in_radio" && x.item.name === "C4FM Rpt"));
 });
 
