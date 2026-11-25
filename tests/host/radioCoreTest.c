@@ -9492,8 +9492,11 @@ static void test_nxdn_stored(void)
 	nxdn_view_text(buf, sizeof buf);
 	CHECK(strstr(buf, "nxdn.run.rx_gid=65535\n") != NULL);
 
-	// No mode change for now on a channel of a kind: its mode is the kind's
+	// A mode change on a channel of a kind is the temporary one every channel allows (channel-modes.md 6): FM while
+	// it stands, the NXDN engine down, and the channel's own NXDN back when it is cleared
 	req(RREQ_MODE, RADIO_MODE_FM);
+	CHECK(sm.view.ch.mode == RADIO_MODE_FM && !radio_nxdn_running() && (sm.view.temp & RADIO_TEMP_MODE));
+	req(RREQ_CLEAR_TEMP, 0);
 	CHECK(sm.view.ch.mode == RADIO_MODE_NXDN && radio_nxdn_running() && !(sm.view.temp & RADIO_TEMP_MODE));
 	// Receive only from the tag: PTT refused as on any channel
 	chans[3].rx_only = true;
@@ -9537,18 +9540,24 @@ static void test_nxdn_stored(void)
 	run(20);
 	memset(&nxdn_saved, 0, sizeof nxdn_saved);
 	channel_t ed = sm.view.ch;
-	CHECK(ed.mode == RADIO_MODE_NXDN && ed.kind == CODEPLUG_KIND_NONE);
-	CHECK(ui_svc_write_channel(6, &ed, 0));
+	CHECK(ed.mode == RADIO_MODE_NXDN && ed.kind == CODEPLUG_KIND_NXDN);
+	// A channel of the kind carries its block: the plain write leaves a kinded record alone, so the editor's air form
+	// is the one that saves it
+	ui_air_conv_t conv0 = { .nxdn = { false, 12, 13, NXDN_SQUELCH_SELECTIVE } };
+	CHECK(ui_svc_write_channel_air(6, &ed, 0, &conv0));
 	storage_job_poll();
 	CHECK(nxdn_saved.number == 6 && !nxdn_saved.conv.rate9600 && nxdn_saved.conv.rx_ran == 12 &&
 	      nxdn_saved.conv.tx_ran == 13);
-	CHECK(nxdn_saved.conv.squelch == NXDN_SQUELCH_SELECTIVE && nxdn_saved.ch.contact == 3);
+	// The contact is the record's, as the editor's form sends the record
+	CHECK(nxdn_saved.conv.squelch == NXDN_SQUELCH_SELECTIVE && nxdn_saved.ch.contact == ed.contact);
 	// No stored contact for the group: none (group 1); RAN squelch
 	s.tx_dst = 4242;
 	s.rx_gid = 0;
 	radio_req_nxdn_settings(&s);
 	run(20);
-	CHECK(ui_svc_write_channel(6, &ed, 0));
+	ed.contact = 0;
+	ui_air_conv_t conv1 = { .nxdn = { false, 12, 13, NXDN_SQUELCH_RAN } };
+	CHECK(ui_svc_write_channel_air(6, &ed, 0, &conv1));
 	storage_job_poll();
 	CHECK(nxdn_saved.ch.contact == 0 && nxdn_saved.conv.squelch == NXDN_SQUELCH_RAN);
 	nxdn_defaults();

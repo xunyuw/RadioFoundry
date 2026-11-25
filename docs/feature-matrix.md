@@ -101,6 +101,7 @@ is `tools/bringup.py list --radio <id>`.
 | `dstar` | off | not written | not written | not written | not written | not written | not written | not written |
 | `ysf` | off | not written | not written | not written | not written | not written | not written | not written |
 | `ysf_vw` | off | not written | not written | not written | not written | not written | not written | not written |
+| `ysf_air` | off | off | off | off | off | off | off | off |
 | `aprs` | pass (seed) | not recorded | not recorded | not recorded | not recorded | not recorded | pass, needs re-run | partial, needs re-run |
 | `aprs_afsk` | not recorded | not recorded | not recorded | not recorded | not recorded | not recorded | not recorded | partial, needs re-run |
 | `aprs_dmr` | not recorded | not recorded | not recorded | not recorded | not recorded | not recorded | not recorded | partial, needs re-run |
@@ -302,7 +303,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | `DSTAR` | ○ | … | … | … | … | … | … | … |
 | `YSF` | ○ | … | … | … | … | … | … | … |
 | `YSF_VW` | ○ | … | … | … | … | … | … | … |
-| `YSF_AIR` | ○ | … | … | … | … | … | … | … |
+| `YSF_AIR` | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | `APRS` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `APRS_AFSK` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `APRS_DMR` | ● | ● | ● | ● | ● | ● | ● | ● |
