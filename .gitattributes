@@ -15,6 +15,10 @@ Makefile	text eol=lf
 *.mjs		text eol=lf
 *.json		text eol=lf
 
+# The test vectors: the host tests compare them byte for byte with what the generator prints (tests/host/Makefile
+# run-dstar), and the generators print LF
+tests/vectors/*	text eol=lf
+
 # Everything else may take the platform's line ends: the editors here write CRLF and nothing in the build reads those
 # files a line at a time
 *		text=auto
