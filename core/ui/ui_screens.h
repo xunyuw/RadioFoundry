@@ -108,6 +108,7 @@ typedef struct {
 	uint8_t tone_target;		// Tone editor: RADIO_TONE_BOTH, RADIO_TONE_TX or RADIO_TONE_RX
 	subtone_t tone_edit;		// Tone editor: the value picked (shown at once, before the radio's view catches up)
 	uint8_t cc_edit;		// Color code editor: the value picked
+	uint8_t dgid_edit;		// Fusion DG-ID editor: the value picked (0-99, two digits)
 	uint8_t diag_first;	// first board line on the diagnostics page
 	bool locked;		// keys locked (long QUICK)
 	bool scanning;
@@ -146,6 +147,8 @@ enum {
 	QT_TIMESLOT, QT_CC, QT_HEAR_ALL, QT_PRIVACY, QT_TALK_TO,
 	QT_TO_VFO,		// on a channel, in place of QT_MODE: copy the channel to the VFO
 	QT_SPLIT,		// in the VFO, in place of QT_MONITOR (FM) / QT_PRIVACY (DMR): the TX frequency or offset
+	QT_ROOM,		// Fusion: the Wires-X room to ask for on the next PTT (a DMR talk group at the hotspot)
+	QT_DGID,		// Fusion: the DG-ID sent (its own tile: the map goes by the ID)
 
 };
 // The tile kind at position 0..8 (keys 1..9) for this channel or the VFO

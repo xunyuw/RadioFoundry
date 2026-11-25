@@ -1895,9 +1895,14 @@ static uint16_t n_inbox;
 static bool soft_volume;
 // The broadcast receiver (Settings > Talk & listen > FM broadcast step) only with the "bcast" token, the same way
 static bool bcast_rx;
-// P25 on this radio (UI_FEAT_P25: the VFO's mode tile offers it) only with the "p25" token; NXDN with "nxdn"
+// P25 on this radio (UI_FEAT_P25: the VFO's mode tile offers it) only with the "p25" token; NXDN with "nxdn";
+// C4FM with "c4fm" (the "ysf" token fakes a call instead, so the two do not share a name)
 static bool p25_radio;
 static bool nxdn_radio;
+#if CONFIG_YSF
+static bool ysf_radio;
+bool radio_ysf_fits(void) { return ysf_radio; }
+#endif
 // Hardware options (Settings > Advanced > Hardware, hal_hwopt.h) only with the "hwopt" token: a revision that starts
 // unset and a plain option
 static int8_t hwopt_val[2];
@@ -1922,7 +1927,13 @@ uint32_t ui_svc_features(void)
 	return 0xFFFFFFFFu & ~(soft_volume ? 0 : UI_FEAT_VOLUME) & ~(bcast_rx ? 0 : UI_FEAT_BCAST) &
 	       ~(ref_trim ? 0 : UI_FEAT_REF_TRIM) &
 	       ~(knob_radio ? 0 : UI_FEAT_VOLUME_KNOB) & ~(p25_radio ? 0 : UI_FEAT_P25) &
-	       ~(nxdn_radio ? 0 : UI_FEAT_NXDN);
+	       ~(nxdn_radio ? 0 : UI_FEAT_NXDN) &
+#if CONFIG_YSF
+	       ~(ysf_radio ? 0 : UI_FEAT_YSF)
+#else
+	       0xFFFFFFFFu
+#endif
+	       ;
 }
 // My radio's names (ui_svc_name_*): placeholders, as the user's own would be; a save writes at once
 static char sim_names[UI_NAME_COUNT][CODEPLUG_NAME_LEN + 1];
@@ -2085,6 +2096,18 @@ bool ui_svc_dmr_timeslot(uint8_t ts)
 	}
 	return true;
 }
+#if CONFIG_YSF
+// Fusion's DG-ID sent, as the radio core would take it: the view and the settings the next start reads
+bool ui_svc_ysf_dgid(uint8_t dgid)
+{
+	if (dgid > 99) {
+		return false;
+	}
+	view.ysf.tx_dgid = dgid;
+	changed();
+	return true;
+}
+#endif
 bool ui_svc_dmr_color_code(uint8_t cc)
 {
 	retune();
@@ -2789,6 +2812,12 @@ void sim_reset(const sim_geom_t *g, sim_map_t map)
 {
 	emergency_on = false;
 	sim_foreign = sim_held = false;
+	// A token lasts one case: the mode tile's tiles are per radio, and a case that asked for C4FM must not leave it
+	// on for the next one (which expects a plain FM radio)
+	p25_radio = nxdn_radio = false;
+#if CONFIG_YSF
+	ysf_radio = false;
+#endif
 	disp.width = g->w;
 	disp.height = g->h;
 	disp.bpp = g->bpp;
@@ -3604,9 +3633,9 @@ static bool run_token(char *t, char *err, size_t len)
 		advance(100);
 		return true;
 	}
-	if (strcmp(t, "dlmode") == 0 && arg != NULL) {	// the debug link sets the mode (DMR_FIELDS): fm, dmr, p25 or nxdn
+	if (strcmp(t, "dlmode") == 0 && arg != NULL) {	// the debug link sets the mode (DMR_FIELDS): fm, dmr, p25, nxdn
 		ui_svc_mode(strcmp(arg, "p25") == 0 ? RADIO_MODE_P25 : strcmp(arg, "nxdn") == 0 ? RADIO_MODE_NXDN :
-			    strcmp(arg, "dmr") == 0 ? RADIO_MODE_DMR : RADIO_MODE_FM);
+			    strcmp(arg, "ysf") == 0 ? RADIO_MODE_YSF : strcmp(arg, "dmr") == 0 ? RADIO_MODE_DMR : RADIO_MODE_FM);
 		advance(100);
 		return true;
 	}
@@ -4050,6 +4079,12 @@ static bool run_token(char *t, char *err, size_t len)
 		nxdn_radio = true;
 		return true;
 	}
+#if CONFIG_YSF
+	if (strcmp(t, "c4fm") == 0) {		// this radio's mode tile offers C4FM (Fusion)
+		ysf_radio = true;
+		return true;
+	}
+#endif
 	if (strcmp(t, "hwopt") == 0) {		// this radio has hardware options (sim_hwopts)
 		board.hwopts = sim_hwopts;
 		board.hwopt_count = 2;

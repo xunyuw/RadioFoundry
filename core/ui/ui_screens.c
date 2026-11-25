@@ -4142,11 +4142,20 @@ uint8_t ui_quick_kind(int pos, const radio_view_t *v)
 	static const uint8_t dmr[UI_QUICK_TILES] = {
 		QT_POWER, QT_TIMESLOT, QT_CC, QT_MODE, QT_HEAR_ALL, QT_PRIVACY, QT_SCAN, QT_TALK_TO, QT_BRIGHTNESS,
 	};
+	// Fusion: the DG-ID sent (what a Pi-Star YSF2DMR maps to a talk group) and the room it asks for; no color code,
+	// timeslot or privacy key, which are DMR's
+	static const uint8_t ysf[UI_QUICK_TILES] = {
+		QT_POWER, QT_DGID, QT_SQUELCH, QT_MODE, QT_MONITOR, QT_ROOM, QT_SCAN, QT_BRIGHTNESS, QT_TONE,
+	};
 	if (pos < 0 || pos >= UI_QUICK_TILES)
 		return QT_POWER;
-	if (!v->vfo && pos == 3)
-		return QT_TO_VFO;	// a channel's tile 4 copies it to the VFO; the VFO's stays Mode
-	uint8_t kind = v->ch.mode == RADIO_MODE_DMR ? dmr[pos] : fm[pos];
+	// A channel's tile 4 is Mode too, now that the mode may be changed there (a temporary change: the radio core does
+	// not write the tag). No tile copies the channel to the VFO: that is the VFO key, which every key map can set
+	// (SK1 on this radio), and the nine tiles stay what each mode needs
+	// The tiles follow the channel's kind as well as its mode: a mode pick reaches the view through the radio task,
+	// while the kind is set at once, so the tiles change with the pick rather than one redraw later
+	uint8_t kind = v->ch.kind == CODEPLUG_KIND_YSF || v->ch.mode == RADIO_MODE_YSF ? ysf[pos] :
+		v->ch.mode == RADIO_MODE_DMR ? dmr[pos] : fm[pos];
 	if (v->vfo && (kind == QT_MONITOR || kind == QT_PRIVACY))
 		return QT_SPLIT;	// the VFO's TX frequency; Monitor stays on its key, privacy on channels
 	return kind;
@@ -4184,6 +4193,8 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 		[QT_TO_VFO] = TRN(QUICK_LABEL_COPY_TO_VFO, TEXT_ALT_OPEN "Copy to VFO"
 			TEXT_ALT_NEXT "To VFO" TEXT_ALT_CLOSE),
 		[QT_SPLIT] = TRN(QUICK_LABEL_TX_FREQ, TEXT_ALT_OPEN "TX freq" TEXT_ALT_NEXT "TXFreq" TEXT_ALT_CLOSE),
+		[QT_DGID] = TRN(QUICK_LABEL_DGID, "DG-ID"),
+		[QT_ROOM] = TRN(QUICK_LABEL_ROOM, "Room"),
 	};
 	uint8_t kind = ui_quick_kind(tile, v);
 	bool editing = s->quick_edit && s->quick_focus == tile;
@@ -4234,9 +4245,10 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 	}
 	case QT_MODE:
 		sb_str(&b, mode_word(v));	// what it is, as every other tile
-		// Only in the VFO (a channel's tile 4 is QT_TO_VFO), in a build with both VFO kinds; it keeps the mode like
-		// its other settings
-		return feat(UI_FEAT_MODE) && v->vfo && CONFIG_VFO_FM && CONFIG_VFO_DMR;
+		// On a channel and in the VFO: a channel's change is temporary (the radio core does not write the tag), and
+		// either way the build needs a second mode to offer
+		return feat(UI_FEAT_MODE) && (CONFIG_VFO_FM || CONFIG_VFO_DMR) && (CONFIG_VFO_FM || CONFIG_FM) &&
+		       (CONFIG_VFO_DMR || CONFIG_DMR || CONFIG_P25 || CONFIG_NXDN || CONFIG_YSF);
 	case QT_TO_VFO:
 		sb_str(&b, TR(QUICK_VALUE_COPY, "Copy"));
 		return CONFIG_VFO_FM || CONFIG_VFO_DMR;	// a channel the VFO can't hold is refused on the press, with the reason
@@ -4284,6 +4296,17 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 	case QT_PRIVACY:
 		sb_str(&b, s->privacy ? TR(VALUE_ON, "On") : TR(VALUE_OFF, "Off"));
 		return feat(UI_FEAT_PRIVACY) && CONFIG_DMR_PRIVACY;
+#endif
+#if CONFIG_YSF
+	case QT_DGID:
+		sb_u32(&b, editing ? s->dgid_edit : v->ysf.tx_dgid, 1);
+		return v->ch.mode == RADIO_MODE_YSF && CONFIG_YSF;
+	case QT_ROOM:
+		// The room this radio asks for: the codeplug record's destination, "ALL" until one is set
+		sb_str(&b, v->ysf.tx_dest[0] != 0 ? v->ysf.tx_dest : TR(VALUE_NONE, "None"));
+		return v->ch.mode == RADIO_MODE_YSF && CONFIG_YSF;
+#endif
+#if CONFIG_DMR
 	case QT_TALK_TO:
 		if (v->dmr.target_private)
 			sb_u32(&b, v->dmr.target_id, 1);

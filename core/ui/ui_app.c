@@ -1382,6 +1382,11 @@ static void quick_change(uint8_t kind, int8_t dir)
 		ui_st.cc_edit = (uint8_t)(c < 0 ? 15 : c > 15 ? 0 : c);
 		break;
 	}
+	case QT_DGID: {
+		int g = ui_st.dgid_edit + dir;
+		ui_st.dgid_edit = (uint8_t)(g < 0 ? 99 : g > 99 ? 0 : g);	// 0-99: what the FICH carries
+		break;
+	}
 	case QT_BRIGHTNESS: {
 		int b = ui_st.brightness + dir * 10;
 		ui_st.brightness = (uint8_t)(b < 10 ? 10 : b > 100 ? 100 : b);
@@ -1400,6 +1405,8 @@ static void quick_close_editor(void)
 		return;		// the editor stays open on what was typed
 	if (kind == QT_CC && ui_st.quick_edit && !ui_svc_dmr_color_code(ui_st.cc_edit))
 		ui_toast(TR(WHY_COLOR_CODE_NOT_IN_BUILD, "Color code: not in this build"));
+	if (kind == QT_DGID && ui_st.quick_edit && !ui_svc_ysf_dgid(ui_st.dgid_edit))
+		ui_toast(TR(WHY_DGID_NOT_IN_BUILD, "DG-ID: not in this build"));
 	if (kind == QT_BRIGHTNESS)
 		ui_svc_setting_set(UI_SET_BRIGHTNESS, ui_st.brightness);
 	ui_st.quick_edit = false;
@@ -1485,13 +1492,15 @@ static void quick_activate(int tile)
 		ui_st.quick_edit = true;	// the hint row says what Up / Down and the digits do
 		break;
 	case QT_MODE: {
-		// FM, DMR, P25, NXDN in turn: P25 and NXDN where the board runs them (the view may change at once: the
-		// host simulator)
+		// FM, DMR, P25, NXDN, C4FM in turn: each where the board runs it (the view may change at once: the host
+		// simulator). Fusion is a channel mode like P25's and NXDN's, and the screens call it C4FM
 		uint32_t feat = ui_svc_features();
-		bool p25 = (feat & UI_FEAT_P25) != 0, nxdn = (feat & UI_FEAT_NXDN) != 0;
+		bool p25 = (feat & UI_FEAT_P25) != 0, nxdn = (feat & UI_FEAT_NXDN) != 0, ysf = (feat & UI_FEAT_YSF) != 0;
 		uint8_t to = view->ch.mode == RADIO_MODE_FM ? RADIO_MODE_DMR :
 			view->ch.mode == RADIO_MODE_DMR && p25 ? RADIO_MODE_P25 :
 			(view->ch.mode == RADIO_MODE_DMR || view->ch.mode == RADIO_MODE_P25) && nxdn ? RADIO_MODE_NXDN :
+			(view->ch.mode == RADIO_MODE_DMR || view->ch.mode == RADIO_MODE_P25 ||
+			 view->ch.mode == RADIO_MODE_NXDN) && ysf ? RADIO_MODE_YSF :
 			RADIO_MODE_FM;
 		static char msg[12];	// the toast keeps the pointer
 		sbuf_t b;
@@ -1559,6 +1568,12 @@ static void quick_activate(int tile)
 		ui_push(SCR_PICKER, 0);
 		break;
 #endif
+#if CONFIG_YSF
+	case QT_DGID:
+		ui_st.dgid_edit = view->ysf.tx_dgid;
+		ui_st.quick_edit = true;
+		break;
+#endif
 	case QT_POWER: {
 		// A cycle tile over three steps, low / the board's default / high, each press the next one up, wrapping
 		// (information-architecture.md 5). Other levels come from the channel
@@ -1606,6 +1621,9 @@ bool ui_quick_key(const input_event_t *ev)
 				ui_toast(TR(QUICK_TOAST_ALL_DIGITS_TYPED, "All digits typed: OK sets TX"));
 			else
 				(void)ui_freq_entry_digit(ui_st.entry_digits, &ui_st.entry_len, (char)('0' + d));
+		} else if (ui_st.quick_edit && kind == QT_DGID) {
+			int g = ui_st.dgid_edit * 10 + d;
+			ui_st.dgid_edit = (uint8_t)(ui_st.dgid_edit <= 9 && g <= 99 ? g : d);
 		} else if (ui_st.quick_edit && kind == QT_CC) {
 			int c = ui_st.cc_edit * 10 + d;
 			ui_st.cc_edit = (uint8_t)(ui_st.cc_edit < 2 && c <= 15 && ui_st.cc_edit != 0 ? c : d);

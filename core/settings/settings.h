@@ -269,7 +269,12 @@ typedef struct {
 	uint16_t flat_rx_hpf;		// the receive path's
 	int16_t flat_tx_1khz;		// the sample value for 1 kHz deviation
 	uint8_t flat_flags;		// SETTINGS_FLAT_* bits
-	uint8_t reserved12[1];		// 0; keeps settings_t a multiple of 4 with no tail padding
+	uint8_t reserved12;		// 0
+	// Fusion's DG-ID sent and heard (ysf-modem.md 1.3): set on the radio over the codeplug record's, as D-STAR's
+	// station is. 0xFF (an older record reads it) = the record's; anything else 0-99 is this radio's
+	uint8_t ysf_tx_dgid;
+	uint8_t ysf_rx_dgid;
+	uint8_t ysf_reserved;		// 0; keeps settings_t a multiple of 4 with no tail padding
 } settings_t;
 
 // Pages: settings_t is stored as records of SETTINGS_PAGE_BYTES each (settings-store.md 2.1). Only the pages its size

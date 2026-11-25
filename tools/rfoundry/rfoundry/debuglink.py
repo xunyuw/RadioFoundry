@@ -21,7 +21,10 @@ INDIVIDUAL_NET = ipaddress.IPv4Network("12.0.0.0/8")	# the host's address is 12.
 SOF1, SOF2 = 0xA5, 0x5A
 CMD_VERSION, CMD_INFO_CHIP, CMD_READ_MEM, CMD_HWOPT = 0x02, 0x0B, 0x0C, 0x21
 CMD_GET_VIEW = 0x09
-VIEW_CORE = 0	# the first section: state, channel, and the CJK table a build reports
+VIEW_CORE = 0	# the first section: state, channel
+# The CJK table a build reports, its own section: in the core one these keys pushed the reply past its limit and were
+# dropped (the radio answered truncated=1)
+VIEW_CJK = 41
 HWOPT_LIST, HWOPT_SET = 0, 1
 
 
@@ -259,10 +262,10 @@ class Link:
         return parse_kv(r[5:].decode("ascii", "replace"))
 
     def font_table(self):
-        """The CJK table a build reports in its core view: {glyphs, in_flash, addr, index_hash}, {} when it has none.
+        """The CJK table a build reports in its cjk view: {glyphs, in_flash, addr, index_hash}, {} when it has none.
         A firmware built with CONFIG_CJK_GLYPHS says which table its index is, so a font written from another run is
         told apart."""
-        v = self.view(VIEW_CORE)
+        v = self.view(VIEW_CJK)
         if "font.glyphs" not in v:
             return {}
         out = {"glyphs": int(v["font.glyphs"]), "in_flash": v.get("font.in_flash") == "1"}
