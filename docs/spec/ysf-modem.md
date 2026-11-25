@@ -167,7 +167,7 @@ What it needs of Fusion is an `air_mode_t` (hal_air.h, air_framer.h):
 |---|---|---|
 | `sym_rate` | 4800 | 3.1: 480 symbols a frame, 100 ms |
 | `levels`, `shape`, `shape_param` | 4, `AIR_SHAPE_C4FM`, 20 | Y 3.2 table 3-1; the chip's pulse is close enough that `AIR_FIT_SHAPE_APPROX` is taken |
-| `dev_outer_hz` | 1800 | the wide setting 1.6 measured on a Yaesu radio (0.91 of 2700 on its own scale); inside the copy's 1700-2900 Hz range for receive, and inside the transmit pair's 1050-2400 Hz |
+| `dev_outer_hz` | 2700 | the standard's wide setting (2.1). A stock radio decides its symbols against that outer level, so a transmission at any other deviation reads there as the wrong levels: checked on air, where 1800 Hz (0.91 of 2700 on a Yaesu radio's own scale) was decoded by this radio and by nothing at the far end. Inside the copy's 1700-2900 Hz range for receive and inside the transmit pair's 1050-2400 Hz |
 | `bw` | `RADIO_BW_25K` | 1.3 |
 | `sync_every_syms` | 480 | the frame sync opens every frame |
 | `nsyncs` | 1 | the 40-bit `YSF_SYNC`, `max_errs` 3 searching / 8 tracking (3.6) |
@@ -184,7 +184,21 @@ the chip's own rate.
 
 The one thing the copy lacks is a known level per kHz (`rx_counts_per_khz` 0, 10.6): the soft modem takes the outer
 level from each sync, as it does for NXDN, so Fusion's absolute deviation matters only for what a receiver hears, not
-for what this radio decodes.
+for what this radio decodes. That is why 1.7's receive side works at either deviation and the transmit side does not:
+a stock radio's decision levels are the standard's, and it needs `dev_outer_hz` at 2700.
+
+Two more pieces this route needs, both from the copy handing the framer packed symbols rather than a chip's records:
+
+- **The framer's frames are packed.** `air_framer_t.hard` is four dibits a byte (`air_syms.h`), while
+  `ysf_engine_rx_dibits` reads one dibit a byte. Passing the chunk straight through made the frame layer read past
+  the end of the framer's buffer on every frame: it found no sync in a stream the framer had locked.
+- **A framer that loses its sync ends the call.** `air_framer.c` calls the mode's `rx_lost` when a locked framer
+  misses `lost_frames` syncs in a row. On a symbol path the frame layer's own four missed syncs get there first; here
+  the framer hands no more frames once it drops, so they never come. The mode's `rx_lost` ends the call
+  (`ysf_rx_lost`, `YSF_END_LOST`) instead of leaving the receiver in it for good.
+
+Both were found on air, on a radio of the family: with the first fixed the frame layer locked and decoded callsigns;
+with the second a call that ended on air released the squelch.
 
 ## 2. The modem
 
