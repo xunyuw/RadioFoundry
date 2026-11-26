@@ -19,6 +19,10 @@ Makefile	text eol=lf
 # run-dstar), and the generators print LF
 tests/vectors/*	text eol=lf
 
+# Markdown: tools/license_grep.sh and the docs checks match whole lines ("## Acknowledgements", "## 致谢" and the
+# rest), and a CR the shell keeps makes every such comparison miss
+*.md		text eol=lf
+
 # Everything else may take the platform's line ends: the editors here write CRLF and nothing in the build reads those
 # files a line at a time
 *		text=auto
