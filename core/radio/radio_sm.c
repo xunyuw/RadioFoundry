@@ -7291,10 +7291,15 @@ static void ptt_down(radio_sm_t *sm, uint32_t now_ms)
 	if (radio_ysf_running()) {
 		// A VOX or tone-burst transmission latched on an FM channel has nothing to do with a Fusion one: its key is
 		// held for that channel's audio, and leaving the latch set would make this PTT the one that clears it instead
-		// of keying (the first press did nothing and the second worked, then the next was lost again)
+		// of keying (the first press did nothing and the second worked, then the next was lost again). Each latch is
+		// under its own switch: a build without VOX or the tones has no such latch to clear
+#if CONFIG_VOX
 		sm->vox_keyed = false;
 		sm->view.vox_keyed = false;
+#endif
+#if CONFIG_FM_TX_TONES
 		sm->burst_keyed = false;
+#endif
 		ysf_ptt_down(sm, now_ms);
 		return;
 	}
