@@ -83,9 +83,17 @@ jobs:
             OUT="build/manual/RadioFoundry-manual-${VERSION}-${L}.pdf"
             RFOUNDRY_REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${REF}" \
               tools/build_manual.sh --version "$VERSION" --lang "$L" --out "$OUT"
-            MANUALS="$MANUALS $OUT"
+            MANUALS=$(printf '%s\n%s' "$MANUALS" "$OUT")
           done
-          echo "MANUAL_PDF=$MANUALS" >> "$GITHUB_ENV"
+          # A multi-line value: upload-artifact reads one path a line, so a space-separated list reaches it as a single
+          # name and it finds nothing
+          {
+            echo "MANUAL_PDF<<EOF"
+            printf '%s\n' "$MANUALS"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+          printf 'built:\n%s\n' "$MANUALS"
+          printf '%s\n' "$MANUALS" | xargs ls -l
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
@@ -119,4 +127,10 @@ jobs:
           else
             gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES"
           fi
-          gh release upload "$TAG" "$MANUAL_PDF" --clobber
+          # MANUAL_PDF holds one path a line, so each PDF goes on its own: a quoted multi-line value would be one
+          # file name to gh
+          echo "$MANUAL_PDF" | while read -r pdf; do
+            [ -n "$pdf" ] || continue
+            gh release upload "$TAG" "$pdf" --clobber
+            echo "attached $pdf"
+          done
