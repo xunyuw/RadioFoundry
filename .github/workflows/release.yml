@@ -286,12 +286,18 @@ jobs:
             TITLE="$TAG (unofficial build)"
             NOTES=$(printf '%s\n\n%s' "**This is not an official RadioFoundry release.** It was built from a modified tree, and the RadioFoundry project does not support it: ask whoever published it." "$NOTES")
           fi
-          # Create it, or find the one the manual workflow made. Every gh call prints what it did and where: a job that
-          # reports success must leave a release behind, and one that does not says why on its own log
+          # Create it, or find the one the manual workflow made. A release this found still a draft is one a previous
+          # run left behind: a draft is invisible to the site and to anyone without write access, so it is published
+          # here, and its title and notes are set again because the run that drafted it may have been an older one of
+          # this file that did not know about unofficial builds
           echo "repo under test: $(gh repo view --json nameWithOwner --jq .nameWithOwner)"
           echo "token scopes: ${GH_TOKEN:+set}"
           if EXIST=$(gh release view "$TAG" --json tagName,isPrerelease,isDraft,name 2>&1); then
             echo "release $TAG already exists: $EXIST"
+            if printf '%s' "$EXIST" | grep -q '"isDraft":true'; then
+              echo "it is a draft: publishing it with this run's title and notes"
+              gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" $PRE --draft=false
+            fi
           else
             echo "no release yet ($EXIST); creating"
             gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES"
@@ -299,3 +305,4 @@ jobs:
           fi
           gh release upload "$TAG" out/* --clobber
           echo "assets on the release: $(gh release view "$TAG" --json assets --jq '.assets | length')"
+          echo "final state: $(gh release view "$TAG" --json tagName,isPrerelease,isDraft,name)"

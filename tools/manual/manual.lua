@@ -71,10 +71,13 @@ end
 -- First heading of each chapter, by file prefix (pandoc --file-scope prefixes ids with the file name made an
 -- identifier, "03-first-bootmd__", and turns a link to the whole file into "#03-first-bootmd")
 local first_heading = {}
+-- Every heading id in the document, so a "#anchor" link is kept only when the label typst will make exists
+local known_anchors = {}
 
 local function collect(doc)
 	for _, block in ipairs(doc.blocks) do
 		if block.t == "Header" and block.identifier ~= "" then
+			known_anchors[block.identifier] = true
 			local file = block.identifier:match("^(.-)__")
 			if file ~= nil and first_heading[file] == nil then
 				first_heading[file] = block.identifier
@@ -94,7 +97,21 @@ local function fix_link(link)
 		return link
 	end
 	if target:sub(1, 1) == "#" then
+		-- A chapter's own anchor. Typst resolves a "#label" against the document's labels, and a chapter translated
+		-- into another language keeps the English anchor in its links while its headings carry translated ones: pandoc
+		-- makes the id from the heading text. A label that is not there aborts the whole build, so an anchor this
+		-- document does not have keeps the link's text and drops the reference.
+		local id = target:sub(2)
+		if known_anchors[id] == nil then
+			return link.content
+		end
 		return link
+	end
+	-- A link to another chapter. Pandoc prefixes a chapter's ids with its file name ("03-first-bootmd__"), so the
+	-- anchor the text names is not the label the target chapter has; the manual keeps the link's text and leaves the
+	-- cross-reference out, which is what the PDF did before anchors between chapters were followed at all.
+	if target:match("^[%w%-_%./]+%.md#") then
+		return link.content
 	end
 	-- A path outside the manual's chapters
 	if repo_url ~= nil and repo_url ~= "" then
