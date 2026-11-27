@@ -20,6 +20,11 @@ UDP_PORT = 3334		# the serial protocols over UDP at the radio's address in netwo
 INDIVIDUAL_NET = ipaddress.IPv4Network("12.0.0.0/8")	# the host's address is 12.<DMR ID>, the radio's that xor 1
 SOF1, SOF2 = 0xA5, 0x5A
 CMD_VERSION, CMD_INFO_CHIP, CMD_READ_MEM, CMD_HWOPT = 0x02, 0x0B, 0x0C, 0x21
+CMD_GET_VIEW = 0x09
+VIEW_CORE = 0	# the first section: state, channel
+# The CJK table a build reports, its own section: in the core one these keys pushed the reply past its limit and were
+# dropped (the radio answered truncated=1)
+VIEW_CJK = 41
 HWOPT_LIST, HWOPT_SET = 0, 1
 
 
@@ -246,6 +251,28 @@ class Link:
 
     def version(self):
         return parse_kv(self.request(CMD_VERSION).decode("ascii", "replace"))
+
+    def view(self, section=VIEW_CORE):
+        """One section of the radio's view as a dict (debuglink_view_section). request() hands back the payload with the
+        status byte already stripped, so what is left of the 6-byte reply header is the radio's clock (4) and the next
+        section (1); the key=value lines follow."""
+        r = self.request(CMD_GET_VIEW, bytes([section]))
+        if len(r) < 5:
+            raise LinkError("the radio refused section %d of its view" % section)
+        return parse_kv(r[5:].decode("ascii", "replace"))
+
+    def font_table(self):
+        """The CJK table a build reports in its cjk view: {glyphs, in_flash, addr, index_hash}, {} when it has none.
+        A firmware built with CONFIG_CJK_GLYPHS says which table its index is, so a font written from another run is
+        told apart."""
+        v = self.view(VIEW_CJK)
+        if "font.glyphs" not in v:
+            return {}
+        out = {"glyphs": int(v["font.glyphs"]), "in_flash": v.get("font.in_flash") == "1"}
+        if out["in_flash"]:
+            out["addr"] = int(v["font.addr"], 0)
+            out["index_hash"] = int(v["font.index_hash"], 0)
+        return out
 
     def read_mem(self, addr, size):
         """READ_MEM in 1000-byte pieces (internal flash, the stock bootloader included)."""

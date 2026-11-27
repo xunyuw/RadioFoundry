@@ -160,9 +160,10 @@ above: one catalog, one switch, the same checks.
 |---|---|
 | The catalog | `tools/i18n.py --new zh 中文 Chinese` writes it with an `X-Glyphs: utf8` header and an `X-Language-Name-Latin` one. A catalog with that header holds UTF-8: ASCII, `font.h`'s glyphs, and characters the CJK face has. Two-byte characters (Latin-1 letters with an accent) are not allowed: the text layer decodes only three-byte sequences, so that Latin-1 names, messages and the Spanish catalog keep working in a build with the CJK face. `--check` lists every character it rejects or the face lacks |
 | The list | A build without the CJK face (`CONFIG_LANG_ZH` off) still lists the language, dimmed: it shows `X-Language-Name-Latin` ("Chinese"), because the Latin font would draw the UTF-8 name as boxes |
-| The face | `tools/cjkfont.py` rasterizes every character the catalogs use plus a reviewed list of Chinese province, prefecture-level city and common repeater words (`tools/cjk_names_zh.txt`) into a 16x16 one-bit glyph and writes the table the firmware links. The current table has 802 characters and is about 27 KB; with the text, Chinese costs about 44 KB. Channel names that use a character outside this list draw a box. Run it whenever a translation or the names list adds a character (`--check` fails until it does) and commit both |
-| The font | One whose license allows embedding bitmaps: an SIL OFL font such as Noto Sans CJK SC or Source Han Sans. The generated file carries the font's copyright, its full OFL text and the font file's SHA-256, because that data is under the font's license, not MIT (see the header of `core/ui/cjk_font_data.c`). Do not use a vendor font that forbids it |
-| Size | A CJK character is 16 px wide and 16 tall, the height of the 8x16 font: 8 characters a line on a 128 px screen, 10 on a 160 px one, 15 on a 240 px one. **A line must be at least 16 px high.** A 240 px color radio draws its words in 8x16 (a CJK build moves its text pages up to that font too) and shows Chinese everywhere; the 160 px class draws them in 6x12 and moves lists, labels, the strip, the hints and the text pages up to the 8x16 font while the language in use is wide, so its lines and rows get taller (`ui_layout_init`, [ui.md 2.5](../spec/ui.md#25-languages)). A 128x64 panel has no room for 16 px lines: it lists `LANG_ZH` and `LANG_DEFAULT_ZH` in `BOARD_UNSUPPORTED`, and CI's maximal build and the flasher leave the language out there. Flash is the other limit: the face and the catalog add about 44 KB, so compare that with the board's app region (`boards/<radio>/memory.ld`) and [the feature matrix](../feature-matrix.md#whole-images). A board without room leaves `CONFIG_LANG_ZH` off in its `config.mk`; the language packs otherwise build side by side |
+| The face | `tools/cjkfont.py` rasterizes every character the catalogs use plus a reviewed list of Chinese province, prefecture-level city and common repeater words (`tools/cjk_names_zh.txt`) into a one-bit glyph and writes the table the firmware links. The current table has 802 characters and is about 27 KB; with the text, Chinese costs about 44 KB. Channel names that use a character outside this list draw a box. Run it whenever a translation or the names list adds a character (`--check` fails until it does) and commit both. `--gb2312` covers every character GB2312 codes (7444, 176 KB at a 12 px cell) — the whole set a Chinese codeplug or a user's own name can hold, so no channel name can meet a box. `--gb2312-level1` is the smaller 3755-common-ideograph subset |
+| The font | One whose license allows embedding bitmaps: an SIL OFL font such as Noto Sans CJK SC or Source Han Sans. The generated file carries the font's copyright, its full OFL text and the font file's SHA-256, because that data is under the font's license, not MIT (see the header of `core/ui/cjk_font_data.c`). A pixel font drawn at the cell's own size reads better there than a scaled outline, and **must cover the characters the table asks for**: [Ark Pixel Font](https://github.com/TakWolf/ark-pixel-font) (OFL-1.1) draws 12 px and 10 px but leaves 392 of the GB2312 characters as an empty box (即, 旋, 热, 然, 窗, 筑, 紧, 警, 隙 among them), so it cannot carry a full face. [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) (OFL-1.1, the same author) fills those holes from other OFL pixel fonts and draws all of GB2312 at 12 px, which is what the 12 px full face uses. Both are made with `--cell 12 --supersample 1`: a bitmap font has glyphs at its designed size only, so `--supersample` must be 1 and the size must match the cell. Check a candidate before choosing it by counting box glyphs across GB2312. Do not use a vendor font that forbids it |
+| Size | A CJK character is as wide as the cell and as tall: 16 px by default (the height of the 8x16 font), or `CONFIG_CJK_CELL` px, which `--cell` must match. **A line must be at least as high as the cell.** A 240 px color radio draws its words in 8x16 (a CJK build moves its text pages up to that font too) and shows Chinese everywhere; the 160 px class draws them in 6x12, so with a 16 px cell it moves lists, labels, the strip, the hints and the text pages up to the 8x16 font while the language in use is wide, and its lines and rows get taller (`ui_layout_init`, [ui.md 2.5](../spec/ui.md#25-languages)). **With a 12 px cell** (`CONFIG_CJK_CELL=12`) those words already fit, so nothing moves and the 160 px layout stays as it is in English. A 128x64 panel has no room for either: it lists `LANG_ZH` and `LANG_DEFAULT_ZH` in `BOARD_UNSUPPORTED`, and CI's maximal build and the flasher leave the language out there. Flash is the other limit: the face and the catalog add about 44 KB, so compare that with the board's app region (`boards/<radio>/memory.ld`) and [the feature matrix](../feature-matrix.md#whole-images). A board without room either leaves `CONFIG_LANG_ZH` off in its `config.mk` or keeps the bitmaps in the data flash (`CONFIG_CJK_FONT_IN_FLASH`, below); the language packs otherwise build side by side |
+| A face too big for the app region | `--out-bin FILE` writes the glyph bitmaps as a binary for the data flash and leaves them out of the C file, which then carries the code point index only. The firmware looks each glyph up by code point and reads it from `CONFIG_CJK_FONT_ADDR` (a board names it: `board.toml` `[flash.stub] font` and `font_size`). Burn it with `rfoundry font FILE --board <radio>`, which writes only the sectors that differ. On a board that uses this, a Chinese line costs one 78 µs SPI read per character drawn; the text layer draws each glyph before it asks for the next, so one static cell serves every caller. The blob is padded to whole 4 KB sectors, and a copy of the firmware without the flash image draws boxes instead of glyphs |
 | Cutting | A string too long for its space is cut at the end, whole characters only (`gfx_text_fit_end` for a line that keeps its start, `gfx_text_fit` for a middle cut), because Chinese has no spaces to cut at a middle. A line wraps after any CJK character (`wrap_line`); Latin words inside it still wrap at their spaces |
 | Switch | `CONFIG_LANG_ZH` is off by default. Measure it like any switch and put the bytes in [the feature matrix](../feature-matrix.md) |
 
@@ -182,6 +183,45 @@ python3 tools/cjkfont.py --font /path/to/NotoSansSC-VF.ttf --weight 500 \
 with `#` are comments. The header records the font file's SHA-256: a different hash means a different font file, so
 say which one you used in the pull request. `--weight` picks a variable font's axis. A different Pillow can render
 slightly different bytes; commit the table it wrote.
+
+For a 160 px radio with a 12 px cell, the face and the bitmaps go in separate places:
+
+```
+python3 tools/cjkfont.py --font fusion-pixel-12px-proportional-zh_hans.ms.bitmap.ttf \
+    --cell 12 --supersample 1 --gb2312 \
+    --font-name "Fusion Pixel Font 12px proportional zh_hans (2026.11.10)" \
+    --copyright "2022 TakWolf (https://takwolf.com)" \
+    --license LICENSES/OFL-1.1.txt --spdx OFL-1.1 \
+    --out-c core/ui/cjk_font_data.c --out-bin build/cjk.bin
+rfoundry font build/cjk.bin --board <radio>
+```
+
+`--out-c` then holds the code point index (14.9 KB for every GB2312 character) and no bitmaps; `--out-bin` holds the
+7444 glyphs padded to whole 4 KB sectors (176 KB), which `rfoundry font` burns into the row the board names. The
+image and the blob must come from the same run: the address in `cjk_font_addr` and the glyph count are the index's,
+and a blob from another run puts every glyph at the wrong place. Commit neither the blob nor a
+`cjk_font_data.c` built with `--out-bin` for a board that does not set `CONFIG_CJK_FONT_IN_FLASH`.
+
+### Entering Chinese on the radio
+
+With `CONFIG_PINYIN`, the text editor's `#` key cycles ABC -> 123 -> abc -> PIN. In PIN the keypad's letters are a
+reading: 2-9 type their first letter and pressing the same key again steps through its letters (so `zhuang` is
+reachable), a letter that leaves no candidate is dropped, the encoder and Up/Down walk the bar of characters and page
+past its end, OK writes the picked character into the name, and BACK drops a letter before it drops a name character.
+
+The tables come from `tools/pinyin_table.py`, which reads the readings from [pypinyin](https://github.com/mozillazg/python-pinyin)
+(MIT). It is a build-time tool: none of its code is in the firmware. It writes 400 readings and 6763 GB2312 characters,
+30 KB in all:
+
+```
+python3 tools/pinyin_table.py --out-c core/ui/pinyin_data.c --out-bin build/pinyin.bin
+rfoundry font build/pinyin.bin --board <radio> --pinyin
+```
+
+The tables do not fit the application region beside a full face, so a board that has Chinese keeps them in the data
+flash (`CONFIG_PINYIN_IN_FLASH`, written to `board.toml` `[flash.stub] pinyin`). Regenerate them after a pypinyin
+upgrade, commit `pinyin_data.c` with the change, and burn the blob again. A character the readings do not cover (a
+symbol) is entered with the plain ABC mode.
 
 ### When the source changes
 

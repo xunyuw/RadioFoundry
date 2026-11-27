@@ -19,6 +19,7 @@ import { RESTORE, makePlan } from "./plan.js";
 import { overlapping as protectOverlap } from "./protect.js";
 import { stockApplication } from "./stockfw.js";
 import { CODEPLUG_SPAN } from "./backup.js";
+import { MEM_SPI } from "./f4stub.js";
 import { TFTP_SIZE } from "../codeplug/image.js";
 import { classify } from "../codeplug/detect.js";
 
@@ -84,4 +85,60 @@ export async function writeCodeplug(link, sectors, progress = () => {}) {
 	}
 	await link.cpsClose();
 	return refused;
+}
+
+// A board's font row: the data flash area a radio with CONFIG_CJK_FONT_IN_FLASH reads its glyph bitmaps from
+// (board.toml [flash.stub] font, in the registry as bytes). null when the board has none.
+export function fontRow(board) {
+	const r = board?.stub?.font;
+	return Array.isArray(r) && r.length === 2 && r[1] > r[0] ? r : null;
+}
+
+// The board's pinyin row: the same for the pinyin tables ([flash.stub] pinyin)
+export function pinyinRow(board) {
+	const r = board?.stub?.pinyin;
+	return Array.isArray(r) && r.length === 2 && r[1] > r[0] ? r : null;
+}
+
+// The file a font or pinyin row takes: exactly the row's size, in whole 4 KB sectors (the tools' --out-bin pads to
+// that). Says what is wrong instead of writing a file that does not fit the row it names.
+export function checkRowFile(row, size, what) {
+	if (!row) return `${what}: the board names no ${what} row`;
+	if (size !== row[1] - row[0]) return `${what}: the file is ${size} bytes and the row holds ${row[1] - row[0]}`;
+	if (size % 4096) return `${what}: the file is not whole 4 KB sectors`;
+	return null;
+}
+
+// Write a font or pinyin row through the stub, which (unlike the CPS) writes any 4 KB sector of the data flash:
+// only the sectors whose CRC differs are erased and programmed, and the stub verifies them all. Returns what
+// spiWrite does: {written, same}.
+export async function writeRow(link, row, data, progress = () => {}) {
+	if (typeof link.spiWrite !== "function") throw new RestoreError("this radio has no stub route: writing a font row needs the stub");
+	return link.spiWrite(data, row[0], { progress });
+}
+
+// Is the row already what the file holds? The stub compares sector CRCs without writing (f4stub's diff)
+export async function rowMatches(link, row, data) {
+	if (typeof link.diff !== "function") return null;
+	const bad = await link.diff(data, row[0], MEM_SPI);
+	return bad.length === 0;
+}
+
+// The font and pinyin rows a backup holds: the rows the board names, sliced out of the bundle's SPI flash read. A
+// backup taken with "all" covers the whole chip, so the rows are in it; one taken smaller is not and yields nothing.
+// A row the bundle does not reach to the end of is left out rather than restored short.
+export function rowsFromBundle(bundle, board) {
+	const spi = bundle.parts.get("spi-flash");
+	if (!spi?.data) return [];
+	const out = [];
+	for (const [what, row] of [["font", fontRow(board)], ["pinyin", pinyinRow(board)]]) {
+		if (!row) continue;
+		const [lo, hi] = row;
+		if (spi.data.length < hi) continue;
+		const data = spi.data.subarray(lo, hi);
+		// all 0xFF is a row nothing was written to: restoring it would erase what the radio has
+		if (!data.some((b) => b !== 0xFF)) continue;
+		out.push({ what, row, data });
+	}
+	return out;
 }

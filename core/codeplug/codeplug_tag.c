@@ -16,9 +16,11 @@ static bool number_ok(uint16_t number) { return number >= 1u && number <= CODEPL
 
 uint16_t codeplug_name_check(const char *name)
 {
+	// FNV-1a over the 16 octets the channel record's name field has (docs/spec/channel-modes.md 2.2): the check
+	// anchors a tag to the stock record's name, so it does not follow CODEPLUG_NAME_LEN when a name grows longer
 	uint32_t h = 2166136261u;
 	bool end = false;
-	for (unsigned i = 0; i < CODEPLUG_NAME_LEN; i++) {
+	for (unsigned i = 0; i < CODEPLUG_OPENFW_NAME_LEN; i++) {
 		uint8_t c = end ? 0u : (uint8_t)name[i];
 		if (c == 0xFFu) {
 			c = 0u;		// a record's padding: the name ends there

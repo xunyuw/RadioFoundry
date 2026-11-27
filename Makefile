@@ -125,6 +125,12 @@ endif
 ifeq ($(CONFIG_MBE),y)
 CORE_DIRS += core/mbe
 endif
+ifeq ($(CONFIG_DSTAR),y)
+CORE_DIRS += core/dstar
+endif
+ifeq ($(CONFIG_YSF),y)
+CORE_DIRS += core/ysf
+endif
 ifeq ($(CONFIG_POSITION),y)
 CORE_DIRS += core/position
 endif
@@ -148,6 +154,11 @@ APP_DIRS := $(CORE_DIRS) $(PLATFORM_DIRS) $(BOARD_DIRS)
 # Sorted: the link order steers LTO's code, and $(wildcard)'s order depends on the make (gotchas 13.10)
 APP_SRC := $(foreach d,$(APP_DIRS),$(sort $(wildcard $(d)/*.c)))
 APP_ASM := $(foreach d,$(APP_DIRS),$(sort $(wildcard $(d)/*.S)))
+# D-STAR's voice codec codes its frame with the DMR full-rate frame's Golay and whitening (core/dmr/ambe/ambeFec.c),
+# which the core/dmr/ambe glob brings in only with DMR
+ifeq ($(CONFIG_DSTAR)$(CONFIG_DMR),yn)
+APP_SRC += core/dmr/ambe/ambeFec.c
+endif
 # The stub entry without the debug link: its listener uses the debug link's framing (dl_frame.c, no RTOS or board)
 ifeq ($(CONFIG_STUB_ENTRY)$(CONFIG_DEBUGLINK),yn)
 APP_SRC += core/debuglink/dl_frame.c
@@ -340,7 +351,6 @@ OBJ := $(APP_OBJ) $(TP_OBJ)
 .SUFFIXES:
 .PHONY: all codec clean size stack-check test print-config print-cc print-unsupported print-not-written print-required print-maximal-skip print-maximal-vars
 all: $(REGISTRY_JSON) $(TARGET).bin $(if $(BOOT_STAGE),$(TARGET)_install.bin) codec
-
 # The codec: merged into $(TARGET)_codec.bin when the radio's stock firmware is in codecs/ (codecs/README.md)
 # A board with a first stage (BOOT_STAGE) merges the codec into the install image, so the merged file starts with the stage
 codec: $(TARGET).bin $(if $(BOOT_STAGE),$(TARGET)_install.bin)
@@ -381,6 +391,9 @@ ABOUT_OBJ := $(patsubst %.c,$(BUILD)/%.o,$(shell grep -l rfoundry_about.h $(APP_
 ABOUT_MORE :=
 ifeq ($(CONFIG_IMBE),y)
 ABOUT_MORE += core/mbe/THIRD_PARTY
+endif
+ifeq ($(CONFIG_DSTAR),y)
+ABOUT_MORE += core/dstar/THIRD_PARTY
 endif
 $(shell python3 tools/gen_about.py AUTHORS platform/$(PLATFORM)/THIRD_PARTY $(BUILD)/gen/rfoundry_about.h $(ABOUT_MORE) | grep -q changed \
 	&& rm -f $(ABOUT_OBJ))

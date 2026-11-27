@@ -432,7 +432,8 @@ static void test_names_and_list(void)
 
 	fresh();
 	with_zones();
-	// A 16-character name taken: the suffix replaces its end
+	// The same name three times: a zone's name field is 16 octets (CODEPLUG_ZONE_NAME_LEN), so the suffix
+	// replaces the end of a name that fills it
 	for (int i = 0; i < 3; i++) {
 		zsWriterBegin(&w, recbuf, sizeof(recbuf), 7, 0, "Sixteen chars ok");
 		zsWriterChannel(&w, &zc);
@@ -688,6 +689,27 @@ static void put_system(uint8_t n, uint8_t type, uint8_t flags, uint8_t level, co
 	memcpy(&v[CODEPLUG_SYS_HDR], block, len);
 	CHECK(codeplug_kv_set((uint16_t)(CODEPLUG_KEY_SYSTEM + n), v, (uint16_t)(CODEPLUG_SYS_HDR + len)));
 }
+
+// The same record as a build wrote it while the name field was 16 octets: the block 8 octets earlier, the record 8
+// octets shorter. An upgrade has to read it (codeplug_records.c picks the header by the stored length)
+#if CONFIG_ZONE_SHARE_MODES
+static void put_system_old(uint8_t n, uint8_t type, uint8_t flags, uint8_t level, const char *name, const uint8_t *block,
+			   uint8_t id_len, uint8_t len)
+{
+	uint8_t v[CODEPLUG_SYS_HDR_OLD + 32];
+
+	memset(v, 0, sizeof(v));
+	v[0] = type;
+	v[1] = flags;
+	v[2] = level;
+	v[3] = id_len;
+	v[4] = 0x44;
+	v[8] = 2;
+	strncpy((char *)&v[12], name, 16);
+	memcpy(&v[CODEPLUG_SYS_HDR_OLD], block, len);
+	CHECK(codeplug_kv_set((uint16_t)(CODEPLUG_KEY_SYSTEM + n), v, (uint16_t)(CODEPLUG_SYS_HDR_OLD + len)));
+}
+#endif
 
 // Channel number of kind on system (CODEPLUG_SYSTEM_NONE: none), its stand-in record DMR and receive only
 static void put_kind(uint16_t number, const char *name, uint32_t rx, uint8_t kind, uint8_t system, uint8_t flags)
@@ -948,6 +970,28 @@ static void test_identityless_nxdn_system(void)
 #endif
 #endif
 
+// A system record an older build wrote, with a 16-octet name field: the upgrade reads it whole, name and block, and a
+// system it already has is found by its identity rather than read as a new one
+#if CONFIG_ZONE_SHARE_MODES
+static void test_old_system_record(void)
+{
+	static const uint8_t old_block[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x09, 0x0A };
+
+	fresh();
+	with_zones();
+	put_system_old(0, 3, CODEPLUG_SYS_TX, CODEPLUG_SHARE_WHOLE, "Old county net", old_block, 5,
+		       (uint8_t)sizeof(old_block));
+
+	codeplug_system_t sys;
+	uint8_t block[64];
+	CHECK(codeplug_system(0, &sys, block, sizeof(block)) == (int)sizeof(old_block));
+	CHECK(sys.type == 3 && sys.flags == CODEPLUG_SYS_TX && sys.sharing == CODEPLUG_SHARE_WHOLE && sys.id_len == 5);
+	CHECK(sys.own_id == 0x44 && sys.fb_chan == 2);
+	CHECK(strcmp(sys.name, "Old county net") == 0);
+	CHECK(memcmp(block, old_block, sizeof(old_block)) == 0);
+}
+#endif
+
 int main(void)
 {
 	test_import();
@@ -961,6 +1005,9 @@ int main(void)
 	test_lands_ahead();
 	test_export();
 	test_modes();
+#if CONFIG_ZONE_SHARE_MODES
+	test_old_system_record();
+#endif
 #if CONFIG_ZONE_SHARE_MODES
 	test_modes_p25_conv();
 	test_modes_nxdn_conv();

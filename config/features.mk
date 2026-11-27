@@ -194,6 +194,24 @@ CONFIG_LANG_ZH ?= n
 # Chinese (docs/build-config.md) turns it off and keeps the translated menus (it draws boxes for any Chinese). Needs
 # CONFIG_LANG_ZH (the radio's font has no glyph for the characters otherwise)
 CONFIG_CJK_GLYPHS ?= $(CONFIG_LANG_ZH)
+# The CJK glyph cell's height and width in pixels, and what tools/cjkfont.py --cell wrote the table at: 16 is the
+# height of the 8x16 font (a 240 px class layout), 12 matches the 6x12 font a 160 px class layout already draws its
+# words in, so that layout stays as it is in English (docs/dev/translating.md)
+CONFIG_CJK_CELL ?= 16
+# Keep the CJK glyph bitmaps in the data flash instead of the application region: the code point index stays here (a
+# few KB) and each glyph is read from the card at CONFIG_CJK_FONT_ADDR. For a board whose application region can't hold
+# a whole vocabulary (a full GB2312 level 1 face is 88 KB at a 12 px cell). Needs CONFIG_CJK_GLYPHS; the image is loaded
+# there once by the flashing tool (tools/cjkfont.py --out-bin writes it)
+CONFIG_CJK_FONT_IN_FLASH ?= n
+CONFIG_CJK_FONT_ADDR ?= 0xF40000
+# The pinyin input method (core/ui/pinyin.c): type Latin letters on the keypad, pick from the Chinese characters they
+# spell. 30 KB of tables and no RAM. Needs CONFIG_LANG_ZH, whose face draws the characters
+CONFIG_PINYIN ?= n
+# Keep the pinyin tables in the data flash instead of the application region: 30 KB, and a board with
+# CONFIG_CJK_FONT_IN_FLASH already has room there. CONFIG_PINYIN_ADDR is the row tools/pinyin_table.py --out-bin
+# writes (board.toml [flash.stub] pinyin), after the CJK bitmaps
+CONFIG_PINYIN_IN_FLASH ?= n
+CONFIG_PINYIN_ADDR ?= 0xF6C000
 # the language the radio starts in, until the user picks one in Settings > Display > Language: one switch per language,
 # at most one on (with more, the first listed wins), off = English. Needs that language's switch. No flash cost
 CONFIG_LANG_DEFAULT_ES ?= n
@@ -260,6 +278,26 @@ CONFIG_BCAST_FM ?= y
 # receive past the band table: a range in board.bands (rx_ext_count) that receives only while Settings > Advanced says
 # so, off by default, never transmit (docs/spec/radio-features.md). Off where the chip documents give no range
 CONFIG_RX_EXT ?= y
+# D-STAR DV (core/dstar, core/radio/radio_dstar.c, docs/spec/dstar-modem.md): the GMSK modem, the DV framing, the
+# software voice codec and the radio core's D-STAR channels on a board's flat FM audio taps. Off by default: a board
+# whose glue runs it turns it on in its config.mk where it fits (one board so far, without the IP gateway; feature
+# matrix). Needs FM
+CONFIG_DSTAR ?= n
+# Yaesu System Fusion (core/ysf, docs/spec/ysf-modem.md): the C4FM modem, the framing (FICH, callsigns, DN voice) and
+# Fusion channels: callsigns shown on receive, PTT sends header, voice and terminator. Needs DMR, whose vocoder hosting
+# and modem it uses (the voice codec is the DMR one: AMBE+2 3600x2450). Off by default: on where a board's glue runs it
+# and its RAM fits (boards/<id>/config.mk)
+CONFIG_YSF ?= n
+# Fusion's Voice FR mode (VW: core/ysf/ysf_vw.c, core/radio/radio_ysf_vw.c, docs/spec/ysf-modem.md 4.1): VW voice
+# received and played, and sent on channels set to VW, through the full-rate codec P25 uses (core/mbe, in integers on
+# the CPU; no stock codec needed). Needs YSF. With it by default: about 16 KB of flash on an HR_C7000 radio, and its
+# codec state shares the mode area with D-STAR's (ysf-modem.md 1.4)
+CONFIG_YSF_VW ?= $(CONFIG_YSF)
+# Fusion through the modem chip's air interface instead of the flat FM paths (core/ysf/ysf_air.c,
+# docs/spec/ysf-modem.md 1.7): the board's hal_air provider receives the profile through the chip's FM copy into the
+# core's soft modem, and transmits its 144-symbol blocks. For a board with neither flat path (an HR_C6000), where
+# radio_ysf.c picks this route when the flat one is missing. Needs YSF and the board's air provider; about 1 KB
+CONFIG_YSF_AIR ?= n
 # audio path probe: debug link command 0x10 to read / write the audio chip's registers and watch the PCM stream's
 # levels, for the USB audio feasibility tests on the bench (docs/spec/hardware-dm1701.md 21.3; needs DEBUGLINK and DMR, whose
 # PCM stream it borrows). A diagnostic, never for a release
@@ -327,11 +365,12 @@ CONFIG_P25 ?= $(CONFIG_DMR)
 CONFIG_NXDN ?= $(CONFIG_DMR)
 CONFIG_NXDN_SCRAMBLER ?= $(CONFIG_NXDN)
 # Derived, never set by hand (a command line or a board's config.mk that sets one stops the build): AIR the air
-# interface, on with any air-framed mode (P25, NXDN); IMBE the full-rate voice decoder and MBE the MBE core, with P25
-$(foreach f,AIR IMBE MBE,$(if $(filter-out undefined,$(origin CONFIG_$(f))),$(error CONFIG_$(f) is derived from CONFIG_P25 \
-	and CONFIG_NXDN ($(origin CONFIG_$(f))): set those instead)))
+# interface, on with any air-framed mode (P25, NXDN); IMBE the full-rate voice codec and MBE the MBE core, with P25 or
+# Fusion's Voice FR
+$(foreach f,AIR IMBE MBE,$(if $(filter-out undefined,$(origin CONFIG_$(f))),$(error CONFIG_$(f) is derived from CONFIG_P25, \
+	CONFIG_NXDN and CONFIG_YSF_VW ($(origin CONFIG_$(f))): set those instead)))
 CONFIG_AIR := $(if $(filter y,$(CONFIG_P25) $(CONFIG_NXDN)),y,n)
-CONFIG_IMBE := $(CONFIG_P25)
+CONFIG_IMBE := $(if $(filter y,$(CONFIG_P25) $(CONFIG_YSF_VW)),y,n)
 CONFIG_MBE := $(CONFIG_IMBE)
 # diagnostics: debug link commands that open an air interface session and move raw symbols, for bench tests (needs an
 # air-framed mode such as P25 or NXDN, and DEBUGLINK; docs/spec/debuglink.md)
@@ -350,8 +389,8 @@ CONFIG_SATELLITE_TLE ?= $(if $(filter y,$(CONFIG_DEBUGLINK)),y,n)
 
 
 FEATURES := USB_SERIAL_REQUEST FM SUBTONE DMR DMR_PRIVACY DMR_AES DMR_TALKER_ALIAS DMR_GPS DMR_SMS DMR_TMS DMR_ARS DMR_LRRP DMR_SIGNALING DMR_EMERGENCY DMR_ROAMING DMR_TRUNK DMR_TRUNK_TX DMR_TRUNK_SUPL DMR_TRUNK_GW VOICE_CAPTURE DMR_IP_GATEWAY ZONE_SHARE DMR_UDP_COMPRESS NET_TCP NET_KISS NET_HTTP NET_HTTP_GZIP NET_WEBCTL NET_RADIO_UDP NET_RIGCTL NET_APRSIS NET_USRP MDNS TFTP TFTP_IDDB IDDB_COMPACT DMR_CONTROL_STATION SNMP SFR SFR_DUALPATH_RX SFR_CWID TASK_STACKS \
-	USB HOSTLINK USB_NETWORK NET_PPP HOTSPOT HOTSPOT_SPLIT DEBUGLINK CPS_OPENFW CPS_FAST VFO VFO_FM VFO_DMR DIAG BACKLIGHT_TEST FONT_XL FONT_AA FONT_BIG LANG_ES LANG_IT LANG_FR LANG_ZH CJK_GLYPHS LANG_DEFAULT_ES LANG_DEFAULT_IT LANG_DEFAULT_FR LANG_DEFAULT_ZH UI_COLOR UI_SETTINGS SCAN DUAL_WATCH BEEP SIG_TONES FM_TX_TONES DTMF \
-	RX_EXT VOX REF_TRIM BATTERY_SAVE VIBRATE GPS AUDIO_PROBE STUB_ENTRY NAND_STORAGE CRASH_LOG CRASH_SCREEN CRASH_REPORT WATCHDOG SUPPORT_INFO FAULT_TRACE AM_RX BCAST_FM APRS APRS_AFSK APRS_DMR APRS_RX APRS_IGATE GPS_SKY SATELLITE_TLE KEY_ASSIGN CHANNEL_LIST CHANNEL_EDIT ZONE_EDIT CONTACT_EDIT VOLUME_BAR P25 P25_TRUNK NXDN NXDN_SCRAMBLER AIR_RAW
+	USB HOSTLINK USB_NETWORK NET_PPP HOTSPOT HOTSPOT_SPLIT DEBUGLINK CPS_OPENFW CPS_FAST VFO VFO_FM VFO_DMR DIAG BACKLIGHT_TEST FONT_XL FONT_AA FONT_BIG LANG_ES LANG_IT LANG_FR LANG_ZH CJK_GLYPHS CJK_FONT_IN_FLASH PINYIN PINYIN_IN_FLASH LANG_DEFAULT_ES LANG_DEFAULT_IT LANG_DEFAULT_FR LANG_DEFAULT_ZH UI_COLOR UI_SETTINGS SCAN DUAL_WATCH BEEP SIG_TONES FM_TX_TONES DTMF \
+	RX_EXT VOX REF_TRIM BATTERY_SAVE VIBRATE GPS AUDIO_PROBE STUB_ENTRY NAND_STORAGE CRASH_LOG CRASH_SCREEN CRASH_REPORT WATCHDOG SUPPORT_INFO FAULT_TRACE AM_RX BCAST_FM DSTAR YSF YSF_VW YSF_AIR APRS APRS_AFSK APRS_DMR APRS_RX APRS_IGATE GPS_SKY SATELLITE_TLE KEY_ASSIGN CHANNEL_LIST CHANNEL_EDIT ZONE_EDIT CONTACT_EDIT VOLUME_BAR P25 P25_TRUNK NXDN NXDN_SCRAMBLER AIR_RAW
 
 # The panel's width in pixels: the display class the board's board.toml names (hardware.gallery = "160x128", the width
 # first). Empty when it names none, which counts as a narrow panel
@@ -377,6 +416,9 @@ $(if $(and $(call feature_on,LANG_DEFAULT_FR),$(if $(call feature_on,LANG_FR),,x
 $(if $(and $(call feature_on,LANG_DEFAULT_ZH),$(if $(call feature_on,LANG_ZH),,x)),$(error CONFIG_LANG_DEFAULT_ZH=y needs CONFIG_LANG_ZH=y))
 $(if $(and $(call feature_on,DMR_AES),$(if $(call feature_on,DMR_PRIVACY),,x)),$(error CONFIG_DMR_AES=y needs CONFIG_DMR_PRIVACY=y))
 $(if $(and $(call feature_on,CJK_GLYPHS),$(if $(call feature_on,LANG_ZH),,x)),$(error CONFIG_CJK_GLYPHS=y needs CONFIG_LANG_ZH=y))
+$(if $(and $(call feature_on,PINYIN),$(if $(call feature_on,LANG_ZH),,x)),$(error CONFIG_PINYIN=y needs CONFIG_LANG_ZH=y))
+$(if $(and $(call feature_on,CJK_FONT_IN_FLASH),$(if $(call feature_on,CJK_GLYPHS),,x)),$(error CONFIG_CJK_FONT_IN_FLASH=y needs CONFIG_CJK_GLYPHS=y))
+$(if $(and $(call feature_on,PINYIN_IN_FLASH),$(if $(call feature_on,PINYIN),,x)),$(error CONFIG_PINYIN_IN_FLASH=y needs CONFIG_PINYIN=y))
 $(foreach f,SFR_DUALPATH_RX SFR_CWID,$(if $(and $(call feature_on,$(f)),$(if $(call feature_on,SFR),,x)),$(error CONFIG_$(f)=y needs CONFIG_SFR=y)))
 $(foreach f,DMR_TRUNK_TX,$(if $(and $(call feature_on,$(f)),$(if $(call feature_on,DMR_TRUNK),,x)),$(error CONFIG_$(f)=y needs CONFIG_DMR_TRUNK=y)))
 $(foreach f,DMR_TRUNK_SUPL DMR_TRUNK_GW,$(if $(and $(call feature_on,$(f)),$(if $(call feature_on,DMR_TRUNK_TX),,x)),$(error CONFIG_$(f)=y needs CONFIG_DMR_TRUNK_TX=y)))
@@ -408,6 +450,22 @@ endif
 ifneq ($(call feature_on,HOTSPOT),)
   ifeq ($(call feature_on,HOSTLINK),)
     $(error CONFIG_HOTSPOT=y needs CONFIG_HOSTLINK=y)
+  endif
+endif
+ifneq ($(call feature_on,DSTAR),)
+  ifeq ($(call feature_on,FM),)
+    $(error CONFIG_DSTAR=y needs CONFIG_FM=y)
+  endif
+endif
+ifneq ($(call feature_on,YSF),)
+  ifeq ($(call feature_on,DMR),)
+    $(error CONFIG_YSF=y needs CONFIG_DMR=y)
+  endif
+endif
+$(if $(and $(call feature_on,YSF_AIR),$(if $(call feature_on,YSF),,x)),$(error CONFIG_YSF_AIR=y needs CONFIG_YSF=y))
+ifneq ($(call feature_on,YSF_VW),)
+  ifeq ($(call feature_on,YSF),)
+    $(error CONFIG_YSF_VW=y needs CONFIG_YSF=y)
   endif
 endif
 ifneq ($(call feature_on,HOTSPOT_SPLIT),)
@@ -567,7 +625,10 @@ CONFIG_DMR_DATA_CORE := $(if $(strip $(foreach f,DMR_SMS DMR_ARS DMR_LRRP DMR_SI
 # Derived: the position service (core/position) is built for the GPS and for everything that reports our position
 CONFIG_POSITION := $(if $(strip $(foreach f,GPS APRS DMR_LRRP DMR_GPS,$(call feature_on,$(f)))),y,n)
 
-FEATURE_DEFS := $(foreach f,$(FEATURES) DMR_DATA_CORE POSITION AIR IMBE MBE,-DCONFIG_$(f)=$(if $(call feature_on,$(f)),1,0))
+# The flat FM paths (hal_audio_tap.h AUDIO_TAP_FM_TX_FLAT / AUDIO_TAP_FM_RX_RAW): the board glue every data modem with its
+# own waveform shares, built for any of them
+CONFIG_FM_FLAT := $(if $(strip $(foreach f,DSTAR YSF,$(call feature_on,$(f)))),y,n)
+FEATURE_DEFS := $(foreach f,$(FEATURES) DMR_DATA_CORE POSITION AIR IMBE MBE FM_FLAT,-DCONFIG_$(f)=$(if $(call feature_on,$(f)),1,0))
 
 ## Numeric build values (board config.mk sets the defaults; the command line overrides)
 # Display safe area in pixels: edges hidden by the bezel or lens. CONFIG_DISPLAY_INSET sets all four
@@ -585,5 +646,5 @@ CONFIG_DMR_AIR_QUEUE_BYTES ?= 2048
 # ours ended, cause not yet known; packets to the same destination go in one transmission instead, with no gap
 CONFIG_DMR_DATA_TX_GUARD_MS ?= 250
 VALUES := DISPLAY_INSET_TOP DISPLAY_INSET_BOTTOM DISPLAY_INSET_LEFT DISPLAY_INSET_RIGHT DMR_AIR_QUEUE_BYTES \
-	  DMR_DATA_TX_GUARD_MS
+	  DMR_DATA_TX_GUARD_MS CJK_CELL CJK_FONT_ADDR PINYIN_ADDR
 FEATURE_DEFS += $(foreach v,$(VALUES),-DCONFIG_$(v)=$(strip $(CONFIG_$(v))))

@@ -102,7 +102,7 @@ The fields `channel_t` holds today, plus what the open-firmware record can't hol
 
 | Field | Size | Notes |
 |---|---|---|
-| name | 16 | UTF-8, NUL padded (open-firmware: 16 ASCII, 0xFF padded) |
+| name | 24 | UTF-8, NUL padded: 8 Chinese characters (3 octets each) or 24 Latin ones (open-firmware: 16 octets, ASCII and Latin-1, 0xFF padded, so a longer name is cut there) |
 | rx_hz, tx_hz | 4 + 4 | Hz, binary (open-firmware: BCD of 10 Hz) |
 | mode, bw, power, flags | 4 | flags: rx_only, dmo, ... |
 | rx_tone, tx_tone | 2 + 2 | type in the top 2 bits, value |
@@ -148,4 +148,8 @@ until the native format exists every channel uses the radio-wide slot.
 2. Re-import (4a) or generated open-firmware view (4b).
 3. Whether the radio-side editor should be allowed while a CPS session is open. Today edits fail cleanly while the
    CPS holds a pending sector, and otherwise interleave with CPS commits at sector granularity.
-4. UTF-8 names: the font has to cover them first.
+4. UTF-8 names: the field is 24 octets and accepts 3-byte UTF-8 mixed with Latin-1 (`name_field_ok`,
+   `core/codeplug/codeplug.c`). What a Chinese name needs beyond that is a face that covers its characters: the
+   interface's own table is a few hundred glyphs, so a name outside it draws a box until the board builds a wider face
+   or reads one from the data flash (`CONFIG_CJK_FONT_IN_FLASH`, [translating.md](../dev/translating.md#chinese-and-other-cjk-languages)).
+   The open-firmware record's 16 octets hold five Chinese characters, so a longer name is cut when written there.

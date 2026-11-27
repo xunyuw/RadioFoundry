@@ -153,9 +153,15 @@ def feature_matrix():
 	"""{switch: {group, title, bytes: {radio column: text}, notes}} from docs/feature-matrix.md."""
 	out = {}
 	for heading, head, rows in md_tables(read("docs/feature-matrix.md")):
-		if "Switch" not in head:
+		# "Switch" (the sizes table) and "Feature switch" (the per-radio defaults table): both name a switch in their
+		# first column, and the whole matrix is read from the two together
+		if "Switch" in head:
+			si = head.index("Switch")
+		elif "Feature switch" in head:
+			si = head.index("Feature switch")
+		else:
 			continue
-		si, ti = head.index("Switch"), head.index("Feature")
+		ti = head.index("Feature") if "Feature" in head else si
 		ni = head.index("Notes") if "Notes" in head else None
 		size_cols = [(i, h[len("Bytes "):]) for i, h in enumerate(head) if h.startswith("Bytes ")]
 		for r in rows:

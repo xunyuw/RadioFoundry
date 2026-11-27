@@ -47,12 +47,19 @@ values = [
 	{ id = "10w", title = "10 W", text = "MD-UV390 Plus 10 W", board_name = "MD-UV380 10W" },
 ]
 
-# The Chinese image beside Spanish: the 160 px class moves its words up to 8x16 while a wide language is in use, and
-# the 720 KB region has room for both (boards/mduv380/config.mk, docs/spec/ui.md 2.5). ci's maximal build skips both
-# switches; this extra builds them
+# The Chinese image: the 12 px cell keeps the 160 px layout as it is in English, and the face and the pinyin tables
+# live in the data flash (boards/mduv380/config.mk, docs/spec/ui.md 2.5). Satellite tracking has to go: its tables are
+# in the app region, and Chinese needs that room for the code point index and the search
 [ci]
 extra = [
-	{ name = "chinese", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_SATELLITE_TLE=n"] },
+	{ name = "chinese", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
+	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n", "LTO=1"] },
+	# Chinese and C4FM together: 698,324 B of the 720 KB region and 125,088 B of RAM (measured 24 Nov 2026). The
+	# hotspot goes because its buffers are the RAM this radio has none of: leaving it in put RAM 892 B over. C4FM
+	# here is the HR_C6000's FM copy into the core's soft modem (ysf-modem.md 1.7), not the flat paths
+	{ name = "chinese-c4fm", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
+	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n",
+	  "CONFIG_YSF=y", "CONFIG_YSF_AIR=y", "CONFIG_HOTSPOT=n", "LTO=1"] },
 ]
 
 [flash]
@@ -144,6 +151,17 @@ key_prefix = "00AA8989"
 id = 5
 tested = false
 spi = { bus = 1, mode = 0, hz = 4500000 }
+# The CJK glyph bitmaps (CONFIG_CJK_FONT_IN_FLASH): the space above the satellite area, blank in every dump. 0x2C000
+# is 176 KB, every character GB2312 codes (7444) at a 12 px cell, 178,656 B of glyphs rounded up to whole sectors;
+# tools/cjkfont.py --out-bin writes it and `rfoundry font` burns it here. It ends at 0xF6C000, inside the free
+# 0x100000 that follows the satellite row
+font = 0xF40000
+font_size = 0x2C000
+
+# The pinyin input method's tables (CONFIG_PINYIN_IN_FLASH): 32 KB right after the bitmaps, blank in every dump.
+# tools/pinyin_table.py --out-bin writes it and `rfoundry font` writes it to the row --pinyin names
+pinyin = 0xF6C000
+pinyin_size = 0x8000
 
 # The codec where the merge puts it (docs/spec/codec-placement.md): tables at their stock address, the code after them
 # (or at the start of sector 10 when it doesn't fit there) and the descriptor, all in sectors 10 and 11. stock lists the SHA-256 of each stock file rfoundry merges the codec

@@ -142,6 +142,28 @@
 #ifndef CONFIG_HOTSPOT_SPLIT
 #define CONFIG_HOTSPOT_SPLIT		0
 #endif
+// D-STAR DV (core/dstar, radio_dstar.c): on here like the rest; in firmware only where a board turns it on
+#ifndef CONFIG_DSTAR
+#define CONFIG_DSTAR			CONFIG_FM
+#endif
+// Yaesu System Fusion (core/ysf): on here like the rest; in firmware only where a board's glue runs it
+#ifndef CONFIG_YSF
+#define CONFIG_YSF			CONFIG_DMR
+#endif
+// Fusion's Voice FR (VW) with the full-rate codec (core/mbe, ysf_vw.c, radio_ysf_vw.c): with Fusion here too
+#ifndef CONFIG_YSF_VW
+#define CONFIG_YSF_VW			CONFIG_YSF
+#endif
+// Fusion through the modem chip's air interface (core/ysf/ysf_air.c, docs/spec/ysf-modem.md 1.7): for a board with
+// neither flat FM path. Off here: only a board whose glue runs it turns it on, and the tests that link radio_ysf.c
+// without it get the flat path's behavior alone
+#ifndef CONFIG_YSF_AIR
+#define CONFIG_YSF_AIR			0
+#endif
+// The flat FM paths' board glue (hal_audio_tap.h), shared by the data modems with a waveform of their own
+#ifndef CONFIG_FM_FLAT
+#define CONFIG_FM_FLAT			(CONFIG_DSTAR || CONFIG_YSF)
+#endif
 #ifndef CONFIG_DEBUGLINK
 #define CONFIG_DEBUGLINK		CONFIG_HOSTLINK
 #endif
@@ -192,7 +214,7 @@
 #ifndef CONFIG_LANG_FR
 #define CONFIG_LANG_FR			0
 #endif
-// Chinese brings its own 16x16 glyphs (core/ui/cjk_font_data.c) and UTF-8 text the text layer decodes (core/ui/gfx.c)
+// Chinese brings its own glyphs (core/ui/cjk_font_data.c) and UTF-8 text the text layer decodes (core/ui/gfx.c)
 #ifndef CONFIG_LANG_ZH
 #define CONFIG_LANG_ZH			0
 #endif
@@ -200,6 +222,32 @@
 // menus stay on, for a board too small to show Chinese (docs/build-config.md). Defaults to LANG_ZH; a board sets it 0
 #ifndef CONFIG_CJK_GLYPHS
 #define CONFIG_CJK_GLYPHS		CONFIG_LANG_ZH
+#endif
+// The CJK glyph cell in pixels: 16 on a layout that draws its words in the 8x16 font, 12 where it draws them in the
+// 6x12 one (a 160x128 panel). tools/cjkfont.py --cell writes a table of the same size, and the two must agree.
+#ifndef CONFIG_CJK_CELL
+#define CONFIG_CJK_CELL			16
+#endif
+// Where the CJK glyphs live: 0 keeps them in this image (cjk_font_data.c, a few hundred of the interface's own
+// characters), 1 leaves the code point index here and reads each glyph from the data flash (tools/cjkfont.py
+// --out-bin), so a whole GB2312 vocabulary fits a radio whose application region can't hold it
+#ifndef CONFIG_CJK_FONT_IN_FLASH
+#define CONFIG_CJK_FONT_IN_FLASH	0
+#endif
+// The pinyin input method (core/ui/pinyin.c, tools/pinyin_table.py): a keypad types Latin letters and the editor
+// offers the Chinese characters they spell, so a name is entered on the radio and not only by a computer. The tables
+// are 30 KB of rodata and the search needs no RAM. Needs CONFIG_LANG_ZH (the characters have to draw)
+#ifndef CONFIG_PINYIN
+#define CONFIG_PINYIN			0
+#endif
+// Keep the pinyin tables in the data flash (tools/pinyin_table.py --out-bin) instead of the application region: a board
+// with CONFIG_CJK_FONT_IN_FLASH has the room there for both. CONFIG_PINYIN_ADDR is where the blob was written, after
+// the CJK bitmaps
+#ifndef CONFIG_PINYIN_IN_FLASH
+#define CONFIG_PINYIN_IN_FLASH		0
+#endif
+#ifndef CONFIG_PINYIN_ADDR
+#define CONFIG_PINYIN_ADDR		0xF6C000
 #endif
 #define CONFIG_LANG_ANY			(CONFIG_LANG_ES || CONFIG_LANG_IT || CONFIG_LANG_FR || CONFIG_LANG_ZH)
 // The language the radio starts in until the user picks one (CONFIG_LANG_DEFAULT_<CODE>, needs its CONFIG_LANG_<CODE>):
@@ -358,7 +406,7 @@
 #define CONFIG_AIR_RAW			0
 #endif
 #ifndef CONFIG_IMBE
-#define CONFIG_IMBE			CONFIG_P25
+#define CONFIG_IMBE			(CONFIG_P25 || CONFIG_YSF_VW)
 #endif
 #ifndef CONFIG_MBE
 #define CONFIG_MBE			CONFIG_IMBE
@@ -472,6 +520,15 @@
 #endif
 #if (CONFIG_SFR_DUALPATH_RX || CONFIG_SFR_CWID) && !CONFIG_SFR
 #error "CONFIG_SFR_DUALPATH_RX and CONFIG_SFR_CWID need CONFIG_SFR"
+#endif
+#if CONFIG_DSTAR && !CONFIG_FM
+#error "CONFIG_DSTAR needs CONFIG_FM"
+#endif
+#if CONFIG_YSF && !CONFIG_DMR
+#error "CONFIG_YSF needs CONFIG_DMR"
+#endif
+#if CONFIG_YSF_VW && !CONFIG_YSF
+#error "CONFIG_YSF_VW needs CONFIG_YSF"
 #endif
 #if CONFIG_HOTSPOT_SPLIT && !CONFIG_HOTSPOT
 #error "CONFIG_HOTSPOT_SPLIT needs CONFIG_HOTSPOT"

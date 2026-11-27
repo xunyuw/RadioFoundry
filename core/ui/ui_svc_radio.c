@@ -5,6 +5,7 @@
 // latches, privacy with the stored key, scan, key beeps and the radio's settings (docs/spec/radio-features.md).
 // These are the strong definitions; ui_svc_stub.c keeps the weak ones for what other packages still have to provide.
 #include "ui_svc.h"
+#include "hal_time.h"
 #include "board.h"
 #include "radio/radio.h"
 #include "radio/beep.h"
@@ -142,6 +143,22 @@ bool ui_svc_dmr_color_code(uint8_t cc)
 	return true;
 }
 
+#if CONFIG_YSF
+// Fusion's DG-ID sent: written into the settings and the mode started again so the next over carries it. False when
+// the build has no Fusion or the amount is out of the FICH's 0-99
+bool ui_svc_ysf_dgid(uint8_t dgid)
+{
+	if (dgid > 99) {
+		return false;
+	}
+	settings_t *st = settings_begin();
+	st->ysf_tx_dgid = dgid;
+	settings_end(hal_millis());
+	radio_req_reload();	// the mode takes the new ID at its next start
+	return true;
+}
+#endif
+
 bool ui_svc_vfo_sfr(uint8_t a)
 {
 #if CONFIG_SFR
@@ -157,7 +174,7 @@ bool ui_svc_vfo_sfr(uint8_t a)
 bool ui_svc_mode(uint8_t mode)
 {
 	if (mode != RADIO_MODE_FM && mode != RADIO_MODE_DMR && !(mode == RADIO_MODE_P25 && CONFIG_P25) &&
-	    !(mode == RADIO_MODE_NXDN && CONFIG_NXDN)) {
+	    !(mode == RADIO_MODE_NXDN && CONFIG_NXDN) && !(mode == RADIO_MODE_YSF && CONFIG_YSF)) {
 		return false;
 	}
 	radio_req_mode(mode);
@@ -223,6 +240,9 @@ uint32_t ui_svc_feat_radio(void)
 #endif
 #if CONFIG_NXDN
 	       (radio_nxdn_fits() ? UI_FEAT_NXDN : 0) |
+#endif
+#if CONFIG_YSF
+	       (radio_ysf_fits() ? UI_FEAT_YSF : 0) |
 #endif
 	       0;
 }

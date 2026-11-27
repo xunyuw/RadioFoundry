@@ -546,6 +546,12 @@ static bool caller_target(ui_target_t *t)
 
 static void open_caller_actions(void)
 {
+#if CONFIG_DSTAR
+	if (view->dstar.on) {
+		ui_push(SCR_DSTAR, 0);	// a D-STAR caller has a callsign, no ID: their actions are UR's (ui_dstar.c)
+		return;
+	}
+#endif
 	ui_target_t t;
 	if (caller_target(&t))
 		ui_open_actions(&t);
@@ -1232,6 +1238,11 @@ bool ui_home_key(const input_event_t *ev)
 			ui_st.hear_all = false;
 			ui_toast(dmon_text(false));
 #endif
+#if CONFIG_DSTAR
+		} else if (view->dstar.on && view->dstar.ur_mode != RDSTAR_UR_CHANNEL) {
+			radio_req_dstar_ur(RDSTAR_UR_CHANNEL, NULL);	// UR chosen for now, or the next over's command
+			ui_toast(TR(DSTAR_TOAST_CHANNEL_UR, "Back to the channel's UR"));
+#endif
 		} else if (view->temporary || ui_st.privacy || (CONFIG_DMR && target_manual())) {
 			radio_req_clear_temporary();
 			ui_svc_talk_to(0, false, UI_TALK_DEFAULT);
@@ -1371,6 +1382,11 @@ static void quick_change(uint8_t kind, int8_t dir)
 		ui_st.cc_edit = (uint8_t)(c < 0 ? 15 : c > 15 ? 0 : c);
 		break;
 	}
+	case QT_DGID: {
+		int g = ui_st.dgid_edit + dir;
+		ui_st.dgid_edit = (uint8_t)(g < 0 ? 99 : g > 99 ? 0 : g);	// 0-99: what the FICH carries
+		break;
+	}
 	case QT_BRIGHTNESS: {
 		int b = ui_st.brightness + dir * 10;
 		ui_st.brightness = (uint8_t)(b < 10 ? 10 : b > 100 ? 100 : b);
@@ -1389,6 +1405,12 @@ static void quick_close_editor(void)
 		return;		// the editor stays open on what was typed
 	if (kind == QT_CC && ui_st.quick_edit && !ui_svc_dmr_color_code(ui_st.cc_edit))
 		ui_toast(TR(WHY_COLOR_CODE_NOT_IN_BUILD, "Color code: not in this build"));
+#if CONFIG_YSF
+	// The same condition as ui_svc_ysf_dgid's own: the tile is not drawn without Fusion, but the editor's close runs
+	// for whatever tile was open when the mode changed under it
+	if (kind == QT_DGID && ui_st.quick_edit && !ui_svc_ysf_dgid(ui_st.dgid_edit))
+		ui_toast(TR(WHY_DGID_NOT_IN_BUILD, "DG-ID: not in this build"));
+#endif
 	if (kind == QT_BRIGHTNESS)
 		ui_svc_setting_set(UI_SET_BRIGHTNESS, ui_st.brightness);
 	ui_st.quick_edit = false;
@@ -1412,6 +1434,32 @@ static void quick_unavailable(uint8_t kind)
 	case QT_VOX: ui_toast(TR(WHY_VOX_NOT_ON_RADIO_YET, "VOX: not on this radio yet")); break;
 	default: ui_toast(TR(WHY_NOT_IN_BUILD, "Not in this build")); break;
 	}
+}
+
+// Quick tile 5's action, on its own so a side key set to Monitor toggle runs the very same code: FM latches the
+// squelch open (or closes it again), DMR turns digital monitor on or off. kind is QT_MONITOR or QT_HEAR_ALL
+static void quick_monitor(uint8_t kind)
+{
+#if CONFIG_DMR
+	if (kind == QT_HEAR_ALL) {
+		if (ui_svc_hear_all(!ui_st.hear_all)) {
+			ui_st.hear_all = !ui_st.hear_all;
+			ui_toast(dmon_text(ui_st.hear_all));
+		} else {
+			quick_unavailable(kind);
+		}
+		return;
+	}
+#endif
+	if (!ui_svc_monitor(!view->monitor))
+		quick_unavailable(kind);
+}
+
+// A side key set to Monitor toggle: tile 5 of the quick settings, kept to the channel's mode (also in the VFO, where
+// the tile is TX freq and the monitor stays on its key)
+void ui_monitor_toggle(void)
+{
+	quick_monitor(view->ch.mode == RADIO_MODE_DMR ? QT_HEAR_ALL : QT_MONITOR);
 }
 
 static void quick_activate(int tile)
@@ -1448,13 +1496,15 @@ static void quick_activate(int tile)
 		ui_st.quick_edit = true;	// the hint row says what Up / Down and the digits do
 		break;
 	case QT_MODE: {
-		// FM, DMR, P25, NXDN in turn: P25 and NXDN where the board runs them (the view may change at once: the
-		// host simulator)
+		// FM, DMR, P25, NXDN, C4FM in turn: each where the board runs it (the view may change at once: the host
+		// simulator). Fusion is a channel mode like P25's and NXDN's, and the screens call it C4FM
 		uint32_t feat = ui_svc_features();
-		bool p25 = (feat & UI_FEAT_P25) != 0, nxdn = (feat & UI_FEAT_NXDN) != 0;
+		bool p25 = (feat & UI_FEAT_P25) != 0, nxdn = (feat & UI_FEAT_NXDN) != 0, ysf = (feat & UI_FEAT_YSF) != 0;
 		uint8_t to = view->ch.mode == RADIO_MODE_FM ? RADIO_MODE_DMR :
 			view->ch.mode == RADIO_MODE_DMR && p25 ? RADIO_MODE_P25 :
 			(view->ch.mode == RADIO_MODE_DMR || view->ch.mode == RADIO_MODE_P25) && nxdn ? RADIO_MODE_NXDN :
+			(view->ch.mode == RADIO_MODE_DMR || view->ch.mode == RADIO_MODE_P25 ||
+			 view->ch.mode == RADIO_MODE_NXDN) && ysf ? RADIO_MODE_YSF :
 			RADIO_MODE_FM;
 		static char msg[12];	// the toast keeps the pointer
 		sbuf_t b;
@@ -1474,8 +1524,7 @@ static void quick_activate(int tile)
 		break;
 	}
 	case QT_MONITOR:
-		if (!ui_svc_monitor(!view->monitor))
-			quick_unavailable(kind);
+		quick_monitor(kind);
 		break;
 	case QT_VOX:
 		if (ui_svc_vox(!view->vox_on))
@@ -1508,12 +1557,7 @@ static void quick_activate(int tile)
 		ui_st.quick_edit = true;
 		break;
 	case QT_HEAR_ALL:
-		if (ui_svc_hear_all(!ui_st.hear_all)) {
-			ui_st.hear_all = !ui_st.hear_all;
-			ui_toast(dmon_text(ui_st.hear_all));
-		} else {
-			quick_unavailable(kind);
-		}
+		quick_monitor(kind);
 		break;
 	case QT_PRIVACY:
 		if (ui_svc_privacy(!ui_st.privacy)) {
@@ -1526,6 +1570,12 @@ static void quick_activate(int tile)
 		break;
 	case QT_TALK_TO:
 		ui_push(SCR_PICKER, 0);
+		break;
+#endif
+#if CONFIG_YSF
+	case QT_DGID:
+		ui_st.dgid_edit = view->ysf.tx_dgid;
+		ui_st.quick_edit = true;
 		break;
 #endif
 	case QT_POWER: {
@@ -1575,6 +1625,9 @@ bool ui_quick_key(const input_event_t *ev)
 				ui_toast(TR(QUICK_TOAST_ALL_DIGITS_TYPED, "All digits typed: OK sets TX"));
 			else
 				(void)ui_freq_entry_digit(ui_st.entry_digits, &ui_st.entry_len, (char)('0' + d));
+		} else if (ui_st.quick_edit && kind == QT_DGID) {
+			int g = ui_st.dgid_edit * 10 + d;
+			ui_st.dgid_edit = (uint8_t)(ui_st.dgid_edit <= 9 && g <= 99 ? g : d);
 		} else if (ui_st.quick_edit && kind == QT_CC) {
 			int c = ui_st.cc_edit * 10 + d;
 			ui_st.cc_edit = (uint8_t)(ui_st.cc_edit < 2 && c <= 15 && ui_st.cc_edit != 0 ? c : d);
@@ -2206,6 +2259,13 @@ void ui_app_key(const input_event_t *ev)
 		return;
 	}
 	if (ev->action == ACT_CONTEXT && ev->gesture == GESTURE_LONG) {
+#if CONFIG_DSTAR
+		if (view->dstar.on) {
+			if (stack[sp].scr != SCR_DSTAR)
+				ui_push(SCR_DSTAR, 0);	// D-STAR's talk target is UR
+			return;
+		}
+#endif
 		if (!CONFIG_DMR || view->ch.mode != RADIO_MODE_DMR)
 			ui_toast(TR(TALK_WHY_DMR_CHANNELS_ONLY, "Talk target: DMR channels only"));
 		else if (stack[sp].scr != SCR_PICKER)
@@ -2213,6 +2273,12 @@ void ui_app_key(const input_event_t *ev)
 		return;
 	}
 	if (ev->action == ACT_TALK_TARGET && (ev->gesture == GESTURE_PRESS || ev->gesture == GESTURE_LONG)) {
+#if CONFIG_DSTAR
+		if (view->dstar.on) {
+			ui_push(SCR_DSTAR, 0);
+			return;
+		}
+#endif
 		if (CONFIG_DMR && view->ch.mode == RADIO_MODE_DMR)
 			ui_push(SCR_PICKER, 0);
 		else
@@ -2234,6 +2300,9 @@ void ui_app_key(const input_event_t *ev)
 			return;
 		case ACT_SCAN_SKIP:
 			ui_scan_skip();
+			return;
+		case ACT_MONITOR_TOGGLE:
+			ui_monitor_toggle();
 			return;
 #if CONFIG_DUAL_WATCH
 		case ACT_DUAL_WATCH:

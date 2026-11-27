@@ -15,11 +15,23 @@ mkdir -p build/dist
 # get 403 "rate limit exceeded". GITHUB_TOKEN (a read-only token in the Pages project's variables) raises that to 5000;
 # without one, a rate limit is retried for about a minute before the build fails
 python3 - build/dist build/dist-beta <<'EOF'
-import importlib.util, json, os, sys, time, urllib.error, urllib.request
+import importlib.util, json, os, re, subprocess, sys, time, urllib.error, urllib.request
 spec = importlib.util.spec_from_file_location("release_version", "tools/release_version.py")
 rv = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rv)
-api = "https://api.github.com/repos/RadioFoundry/RadioFoundry/releases?per_page=30"
+# owner/name of the repository this checkout came from: a fork's Pages project must offer its own releases, or the
+# page would install the upstream's firmware on a visitor's radio while showing the fork's docs
+repo_slug = ""
+try:
+	out = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, timeout=20).stdout.strip()
+	m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", out)
+	repo_slug = m.group(1) if m else ""
+except (OSError, subprocess.SubprocessError):
+	repo_slug = ""
+# The releases this build offers: the project's own repository, or the one this checkout came from (a fork's Pages
+# project serves its fork's releases). RFOUNDRY_RELEASE_REPO overrides either, as owner/name
+api = "https://api.github.com/repos/%s/releases?per_page=30" % (
+	os.environ.get("RFOUNDRY_RELEASE_REPO") or repo_slug or "RadioFoundry/RadioFoundry")
 headers = {"Accept": "application/vnd.github+json"}
 if os.environ.get("GITHUB_TOKEN"):
 	headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
@@ -34,10 +46,12 @@ for attempt in range(4):
 			raise
 		print("GitHub API %d, retrying" % e.code)
 		time.sleep(10 * (attempt + 1))
-# by release name (tools/release_version.py), never drafts; a tag that isn't a release name is not offered
+# by release name (tools/release_version.py), never drafts; a tag that isn't a release name is not offered. A fork's
+# name (v26.11-bi4aoq) is never this project's stable release, whatever its GitHub prerelease flag says: it is offered
+# the way a beta is, as an opt-in version link, so the default download stays ours
 named = {r["tag_name"]: r for r in rels if not r.get("draft") and rv.parse(r["tag_name"]) is not None}
-stable = rv.newest([t for t, r in named.items() if not r.get("prerelease")])
-beta = rv.newest([t for t, r in named.items() if r.get("prerelease")])
+stable = rv.newest([t for t, r in named.items() if not r.get("prerelease")], own_only=True)
+beta = rv.newest([t for t in named if t != stable and (named[t].get("prerelease") or rv.is_fork(t))])
 if beta and stable and rv.parse(beta) < rv.parse(stable):
 	beta = None
 with open(sys.argv[2], "w") as f:

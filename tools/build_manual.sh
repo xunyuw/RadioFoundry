@@ -23,11 +23,13 @@ TYPST=${TYPST:-typst}
 VERSION=""
 OUT=""
 TYP_ONLY=0
+LANG_CODE=""
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--version) VERSION=$2; shift 2 ;;
 	--out) OUT=$2; shift 2 ;;
+	--lang) LANG_CODE=$2; shift 2 ;;
 	--typ-only) TYP_ONLY=1; shift ;;
 	-h|--help) sed -n '5,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 	*) echo "build_manual.sh: unknown argument $1" >&2; exit 2 ;;
@@ -52,22 +54,36 @@ mkdir -p "$BUILD"
 [ -n "$OUT" ] || OUT="$BUILD/RadioFoundry-manual-$VERSION.pdf"
 TYP="$BUILD/manual.typ"
 
-# Chapters in order, relative to docs/user (pandoc --file-scope keys the cross-file links by these names)
-CHAPTERS=$(cd docs/user && ls [0-9][0-9]-*.md)
+# Chapters in order. A language the site translates docs into keeps them under docs/i18n/<code>/user/, mirroring the
+# English tree chapter for chapter; a chapter with no translation is skipped rather than built from the English, so
+# the PDF a language gets is one in that language throughout.
+SRC_DIR="docs/user"
+if [ -n "$LANG_CODE" ]; then
+	SRC_DIR="docs/i18n/$LANG_CODE/user"
+	if [ ! -d "$SRC_DIR" ]; then
+		echo "build_manual.sh: no chapters in $SRC_DIR" >&2
+		exit 2
+	fi
+fi
+CHAPTERS=$(cd "$SRC_DIR" && ls [0-9][0-9][0-9]*-*.md 2>/dev/null || ls [0-9][0-9]*[a-z]-*.md [0-9][0-9]-*.md 2>/dev/null | sort -u)
 if [ -z "$CHAPTERS" ]; then
-	echo "build_manual.sh: no chapters in docs/user" >&2
+	echo "build_manual.sh: no chapters in $SRC_DIR" >&2
 	exit 2
 fi
 
 DATE=$(date -u +%Y-%m-%d)
+TITLE="RadioFoundry User Manual"
+if [ "$LANG_CODE" = zh ]; then
+	TITLE="RadioFoundry 用户手册"
+fi
 # shellcheck disable=SC2086 # the chapter list is split on purpose
-(cd docs/user && RFOUNDRY_MANUAL_DIR=docs/user RFOUNDRY_REPO_ROOT="$ROOT" "$PANDOC" \
+(cd "$SRC_DIR" && RFOUNDRY_MANUAL_DIR="$SRC_DIR" RFOUNDRY_REPO_ROOT="$ROOT" "$PANDOC" \
 	--from=gfm --file-scope \
 	--to=typst --standalone \
 	--template="$ROOT/tools/manual/manual.typ" \
 	--lua-filter="$ROOT/tools/manual/manual.lua" \
 	--toc --toc-depth=2 \
-	--metadata title="RadioFoundry User Manual" \
+	--metadata title="$TITLE" \
 	--metadata subtitle="Version $VERSION" \
 	--metadata date="$DATE" \
 	--output="$TYP" \

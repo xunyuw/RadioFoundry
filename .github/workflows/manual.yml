@@ -65,10 +65,20 @@ jobs:
             VERSION="$(git rev-parse --short=8 HEAD)"
             REF="${GITHUB_SHA}"
           fi
+          # Every language the site translates the manual into gets its own PDF, so a reader who uses the radio in that
+          # language has a book in it: the English one, then each docs/i18n/<code>/user/ tree
           OUT="build/manual/RadioFoundry-manual-${VERSION}.pdf"
           RFOUNDRY_REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${REF}" \
             tools/build_manual.sh --version "$VERSION" --out "$OUT"
-          echo "MANUAL_PDF=$OUT" >> "$GITHUB_ENV"
+          MANUALS="$OUT"
+          for L in $(ls docs/i18n 2>/dev/null); do
+            [ -d "docs/i18n/$L/user" ] || continue
+            OUT="build/manual/RadioFoundry-manual-${VERSION}-${L}.pdf"
+            RFOUNDRY_REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${REF}" \
+              tools/build_manual.sh --version "$VERSION" --lang "$L" --out "$OUT"
+            MANUALS="$MANUALS $OUT"
+          done
+          echo "MANUAL_PDF=$MANUALS" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with:
@@ -83,11 +93,19 @@ jobs:
         run: |
           set -eu
           TAG="${GITHUB_REF_NAME}"
-          # a beta tag (bN) is a pre-release: the site's default install (the latest release) skips it
+          # This workflow and the firmware one both run on a tag and either may reach the release first. Everything a
+          # release needs to say about itself is decided here and in release.yml by the same rule, so a release the
+          # manual created reads the same as one the firmware did: a pre-release for bN and for a fork's name, and a
+          # title and notes that say an unofficial build is one.
           PRE=""
           if python3 tools/release_version.py prerelease "$TAG"; then PRE=--prerelease; fi
+          TITLE="RadioFoundry $TAG"
+          NOTES="Firmware images (without the AMBE codec), rfoundry and the user manual. Flash with: rfoundry flash --release ${TAG} (docs/user/02-installing.md)."
+          if ! python3 tools/release_version.py own "$TAG"; then
+            TITLE="$TAG (unofficial build)"
+            NOTES=$(printf '%s\n\n%s' "**This is not an official RadioFoundry release.** It was built from a modified tree, and the RadioFoundry project does not support it: ask whoever published it." "$NOTES")
+          fi
           if ! gh release view "$TAG" > /dev/null 2>&1; then
-            gh release create "$TAG" --verify-tag $PRE --generate-notes --title "RadioFoundry $TAG" \
-              --notes "Firmware images (without the AMBE codec), rfoundry and the user manual. Flash with: rfoundry flash --release ${TAG} (docs/user/02-installing.md)."
+            gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES"
           fi
           gh release upload "$TAG" "$MANUAL_PDF" --clobber

@@ -129,6 +129,11 @@ typedef struct {
 	uint32_t overruns;	// ... dropped: the task was behind
 	uint32_t chunks;	// chunks handed to the framer (AIR_EV_RX)
 	uint32_t copy_restarts;	// the copy set up again after no half came for a while (a tap provider)
+	// A chip's transmit side, for a transmission that never leaves: its own state machine's step and the chunks it
+	// holds (0 for a provider that doesn't have one)
+	uint8_t tx_state;
+	uint8_t tx_queue;
+	uint32_t opens, closes;		// the provider's session count (how often it was taken and put back)
 	uint32_t lost_ms;	// ... the first since start-up or a stats reset: its uptime (0: none) and four words the
 	uint32_t lost_regs[4];	// platform took around the poll that found it, as its provider's spec lists them
 } air_rx_counts_t;

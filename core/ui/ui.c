@@ -32,7 +32,7 @@
 // the dual Home's layout table (dual_choose) live in frames of their own to stay below it, as a 4 bpp panel's palette
 // lookup adds 48 bytes under every fill. 516 words (2064 bytes) leave the 208 byte port overhead, the 128 byte margin and 8 bytes.
 // Every word here is RAM on all radios: raise it only by what the check shows
-#define UI_TASK_STACK_WORDS	516
+#define UI_TASK_STACK_WORDS	580	// 2064 B was 208 short once the quick keys grew (make stack-check, a 160x120 board)
 
 #define SPLASH_MS		1000
 #define FRAME_MIN_MS		50	// at most 20 redraws a second
@@ -110,7 +110,7 @@ static void ui_task(void *arg)
 
 	if (have_fb) {
 		ui_layout_init();
-		char line1[17], line2[17];
+		char line1[CODEPLUG_NAME_LEN + 1], line2[CODEPLUG_NAME_LEN + 1];
 		ui_svc_boot_text(line1, line2);
 		// the release name when this is one (v26.11), else the commit
 		gfx_frame_begin();

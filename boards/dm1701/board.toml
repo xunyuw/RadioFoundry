@@ -34,11 +34,13 @@ FM, DMR voice and data, text messages, alerts, emergency, scan, the hotspot, sin
 duplex half and the USB network services work on air. Open: standalone SFR and a two-radio split duplex pair."""
 release = "stable"
 
-# The audio tap's probe build: without LTO it no longer fits, so ci keeps it building with LTO=1. The Chinese image is
-# built beside Spanish with the debug link on: the 720 KB app region has room for both (boards/dm1701/memory.ld)
+# The audio tap's probe build: without LTO it no longer fits, so ci keeps it building with LTO=1. Two switches give it
+# room as the image grew (APRS_RX first, then the satellite tracking whose tables are the RAM it needs); a probe image is
+# a bench tool, not a release (docs/build-config.md CONFIG_AUDIO_PROBE). The Chinese image is built beside Spanish with
+# the debug link on: the 720 KB app region has room for both (boards/dm1701/memory.ld)
 [ci]
 extra = [
-	{ name = "audio-probe", make = ["CONFIG_AUDIO_PROBE=y", "CONFIG_APRS_RX=n", "LTO=1"] },
+	{ name = "audio-probe", make = ["CONFIG_AUDIO_PROBE=y", "CONFIG_APRS_RX=n", "CONFIG_SATELLITE_TLE=n", "LTO=1"] },
 	{ name = "chinese", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_SATELLITE_TLE=n"] },
 ]
 

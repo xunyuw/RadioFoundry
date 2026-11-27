@@ -241,7 +241,7 @@ static void test_sync_creates_zone_and_safe_editable_channels(void)
 	CHECK(codeplug_channel(zones[0].channels[0], &iss));
 	CHECK(codeplug_channel(zones[0].channels[1], &hubble));
 	CHECK(strcmp(iss.name, "ISS (ZARYA)") == 0);
-	CHECK(strcmp(hubble.name, "HUBBLE SPACE TEL") == 0);
+	CHECK(strcmp(hubble.name, "HUBBLE SPACE TELESCOPE") == 0);
 	CHECK(iss.rx_hz == 437800000u && iss.tx_hz == 145990000u);
 	CHECK(iss.tx_tone.type == TONE_CTCSS && iss.tx_tone.value == 670u);
 	CHECK(hubble.rx_hz == profile.rx_hz && hubble.tx_hz == profile.tx_hz);

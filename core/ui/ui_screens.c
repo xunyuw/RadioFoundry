@@ -215,18 +215,22 @@ void ui_layout_init(void)
 	}
 
 #if CONFIG_LANG_ZH
-	// A CJK character is 16 px tall (core/ui/cjk_font.h), so a line that may hold Chinese needs a 16 px font, and only
-	// while the language in use is a wide one: English and Spanish keep the tighter layout in the same build. Where the
-	// layout already draws its words in one (the 240 px class), only the smallest font, which text pages use, moves up to
-	// it. Where it draws them in the 6x12 font (the 160 px class), those words move up to the 8x16 one, which costs Home
-	// its zone line and a list two rows on a 160x120 panel (docs/spec/ui.md 2.5). A 128x64 panel has no room for a 16 px
-	// line at all: its layout stays as it is and the board must not build the language in (BOARD_UNSUPPORTED,
-	// docs/build-config.md)
+	// A line that may hold Chinese needs a font at least as tall as the glyph cell (CJK_FONT_H, CONFIG_CJK_CELL), and
+	// only while the language in use is a wide one: English and Spanish keep the tighter layout in the same build.
+	//
+	// With the 16 px cell (CONFIG_CJK_CELL=16, an outline font): where the layout already draws its words in one (the
+	// 240 px class), only the smallest font, which text pages use, moves up to it. Where it draws them in the 6x12 font
+	// (the 160 px class), those words move up to the 8x16 one, which costs Home its zone line and a list two rows on a
+	// 160x120 panel (docs/spec/ui.md 2.5). A 128x64 panel has no room for a 16 px line at all: its layout stays as it is
+	// and the board must not build the language in (BOARD_UNSUPPORTED, docs/build-config.md).
+	//
+	// With a 12 px cell (a pixel font drawn at that size) the words already fit where they are, so nothing moves: the
+	// 160 px class keeps its 6x12 lines and the layout it has in English.
 	if (lang_wide(lang_current())) {
 		if (L->small->h >= CJK_FONT_H) {
 			if (L->tiny->h < CJK_FONT_H)
 				L->tiny = L->small;
-		} else if (w >= 150) {		// the 160 px class: 8x16 for lists, labels, the strip and the hints
+		} else if (w >= 150 && CJK_FONT_H > 12) {	// 160 px class, 16 px cell: 8x16 for lists, labels, strip and hints
 			L->small = f8;
 			L->tiny = f8;
 		}
@@ -1108,8 +1112,259 @@ static void draw_place(const radio_view_t *v, const ui_state_t *s)
 		gfx_text(L->medium, x, base - L->medium->ascent, GLYPH_DOT, ui_col.warn);
 }
 
+#if CONFIG_DSTAR
+// What the talk line and the Send to row say UR is: the reflector commands by name, "for now" a choice, else the call
+void ui_dstar_ur_text(const radio_dstar_view_t *d, sbuf_t *b, bool longer)
+{
+	switch (d->ur_mode) {
+	case RDSTAR_UR_LINK:
+		sb_str(b, TR(DSTAR_UR_LINK, "Link "));
+		// "REF030CL": the reflector, then its module apart
+		for (unsigned i = 0; i < 6 && d->tx_ur[i] != '\0' && d->tx_ur[i] != ' '; i++) {
+			sb_chr(b, d->tx_ur[i]);
+		}
+		if (strlen(d->tx_ur) >= 7) {
+			sb_chr(b, ' ');
+			sb_chr(b, d->tx_ur[6]);
+		}
+		break;
+	case RDSTAR_UR_UNLINK: sb_str(b, TR(DSTAR_ROW_UNLINK, "Unlink")); break;
+	case RDSTAR_UR_ECHO: sb_str(b, TR(DSTAR_ROW_ECHO, "Echo test")); break;
+	case RDSTAR_UR_INFO: sb_str(b, TR(DSTAR_ROW_INFO, "Gateway info")); break;
+	default:
+		sb_str(b, d->tx_ur[0] != '\0' ? d->tx_ur : "CQCQCQ");
+		break;
+	}
+	if (longer && d->ur_mode >= RDSTAR_UR_LINK) {
+		sb_str(b, TR(DSTAR_UR_NEXT_OVER, " next over"));
+	} else if (longer && d->ur_mode != RDSTAR_UR_CHANNEL) {
+		sb_str(b, TR(DSTAR_UR_FOR_NOW, " for now"));
+	}
+}
+
+// D-STAR's talk line: where the next over goes (UR), a choice for now or a one-over command in the warn color with its
+// lifetime said, as DMR's reply window is; or why PTT can't send
+static void draw_talk_dstar(const radio_view_t *v)
+{
+	const ui_layout_t *L = &ui_layout;
+	const font_t *f = L->medium;
+	const radio_dstar_view_t *d = &v->dstar;
+	char buf[64], fit[48];
+	sbuf_t b;
+	sb_init(&b, buf, sizeof buf);
+	color_t c = ui_col.fg;
+	if (d->fault == RDSTAR_NO_PATH) {
+		sb_str(&b, TR(DSTAR_WHY_NO_PATH, "D-STAR: radio can't"));
+		c = ui_col.warn;
+	} else if (v->ch.rx_only) {
+		sb_str(&b, TR(WORD_RX_ONLY, "RX only"));
+		c = ui_col.warn;
+	} else if (d->no_call) {
+		sb_str(&b, TR(DENY_WHY_NO_CALLSIGN, "No callsign set"));
+		c = ui_col.warn;
+	} else {
+		// The longer form first, the bare UR where it doesn't fit
+		sb_str(&b, TEXT_ALT_OPEN);
+		ui_dstar_ur_text(d, &b, true);
+		sb_str(&b, TEXT_ALT_NEXT);
+		ui_dstar_ur_text(d, &b, false);
+		sb_str(&b, TEXT_ALT_CLOSE);
+		if (d->ur_mode != RDSTAR_UR_CHANNEL)
+			c = ui_col.warn;
+	}
+	int x = gfx_text(f, 0, L->talk_y, GLYPH_ARROW, ui_col.dim);
+	gfx_text_fit(f, buf, gfx_width() - x, fit, sizeof fit);
+	gfx_text(f, x, L->talk_y, fit, c);
+}
+
+// Chips: the mode, the route (direct, or the repeater the over goes through), power
+static void draw_chips_dstar(const radio_view_t *v)
+{
+	const ui_layout_t *L = &ui_layout;
+	const font_t *f = L->small;
+	const radio_dstar_view_t *d = &v->dstar;
+	int w = gfx_width(), x = 0, y = L->chips_y;
+	char buf[40], fit[40];
+	sbuf_t b;
+	x = gfx_text(f, x, y, "DV", ui_col.fg) + f->w;
+	bool pw_temp = v->power != channel_power(v);
+	const char *pw = ui_power_name(v->power, v->ch.tx_hz);
+	int pw_w = gfx_text_width(f, pw) + (pw_temp ? gfx_text_width(f, GLYPH_DOT) : 0);
+	sb_init(&b, buf, sizeof buf);
+	if (d->tx_repeater) {
+		sb_str(&b, TEXT_ALT_OPEN);
+		sb_str(&b, TR(DSTAR_CHIP_VIA, "via "));
+		sb_str(&b, d->tx_rpt1);
+		sb_str(&b, TEXT_ALT_NEXT);
+		sb_str(&b, d->tx_rpt1);
+		sb_str(&b, TEXT_ALT_CLOSE);
+	} else {
+		sb_str(&b, TR(DSTAR_CHIP_DIRECT, "Direct"));
+	}
+	gfx_text_fit(f, buf, w - x - pw_w - f->w, fit, sizeof fit);
+	x = gfx_text(f, x, y, fit, ui_col.fg) + f->w;
+	if (pw_temp)
+		x = gfx_text(f, x, y, GLYPH_DOT, ui_col.warn);
+	if (x + gfx_text_width(f, pw) <= w)
+		gfx_text(f, x, y, pw, pw_temp ? ui_col.warn : ui_col.fg);
+}
+
+// The activity area while nothing is heard: the last caller and when, then their message; or why there's no voice
+static void draw_last_heard_dstar(const radio_view_t *v, const ui_state_t *s, int y)
+{
+	const font_t *sm = ui_layout.small;
+	const radio_dstar_view_t *d = &v->dstar;
+	int w = gfx_width();
+	char who[40], line2[48], fit[48];
+	sbuf_t b;
+	bool two = ui_layout.activity_h >= 2 * sm->h;
+	const char *why = d->voice_off == RDSTAR_VOICE_NO_RAM ? TR(DSTAR_WHY_NO_VOICE_RAM, "No RAM for voice") :
+		d->voice_off == RDSTAR_VOICE_NO_STREAM ? TR(DSTAR_WHY_NO_AUDIO, "No audio stream") :
+		d->fault == RDSTAR_RX_REFUSED ? TR(DSTAR_WHY_RX_REFUSED, "Receiver refused") :
+		d->fault == RDSTAR_NO_CAL ? TR(DSTAR_WHY_NO_CAL, "TX not calibrated") : NULL;
+	if (!d->heard) {
+		int n = why != NULL && two ? 2 : 1;
+		y += (ui_layout.activity_h - n * sm->h) / 2;
+		gfx_text(sm, 0, y, TR(EMPTY_NO_CALLS_HEARD, "No calls heard yet"), ui_col.dim);
+		if (n == 2)
+			gfx_text(sm, 0, y + sm->h, why, ui_col.warn);
+		return;
+	}
+	sb_init(&b, who, sizeof who);
+	sb_str(&b, d->my);
+	if (d->suffix[0] != '\0') {
+		sb_chr(&b, '/');
+		sb_str(&b, d->suffix);
+	}
+	sb_chr(&b, ' ');
+	sb_age(&b, s->now_ms - d->heard_ms);
+	sb_init(&b, line2, sizeof line2);
+	if (why != NULL) {
+		sb_str(&b, why);
+	} else if (d->msg[0] != '\0') {
+		sb_chr(&b, '"');
+		sb_str(&b, d->msg);
+		sb_chr(&b, '"');
+	} else {
+		sb_str(&b, "UR ");
+		sb_str(&b, d->ur);
+	}
+	if (two) {
+		gfx_text_fit(sm, who, w, fit, sizeof fit);
+		gfx_text(sm, 0, y, fit, ui_col.fg);
+		gfx_text_fit(sm, line2, w, fit, sizeof fit);
+		gfx_text(sm, 0, y + sm->h, fit, why != NULL ? ui_col.warn : ui_col.dim);
+		return;
+	}
+	y += (ui_layout.activity_h - sm->h) / 2;
+	gfx_text_fit(sm, who, w, fit, sizeof fit);
+	gfx_text(sm, 0, y, fit, ui_col.fg);
+}
+#endif
+
+#if CONFIG_YSF
+// Why a heard Fusion transmission isn't played, or NULL. VW plays where the full-rate codec is built, and needs no
+// codec in flash: it runs on the CPU
+static const char *ysf_why(const radio_ysf_view_t *y)
+{
+	bool vw = y->mode == RYSF_MODE_VW;
+	return vw && !CONFIG_YSF_VW ? TR(YSF_WHY_VW, "VW: not played") :
+		y->mode == RYSF_MODE_DATA ? TR(YSF_WHY_DATA, "Data: not played") :
+		y->muted ? TR(YSF_WHY_OTHER_DGID, "Other DG-ID: not played") :
+		!y->codec && !vw ? TR(WHY_NO_CODEC, "No codec: voice off") : NULL;
+}
+
+// Who a heard Fusion transmission is from: its callsign, else its radio ID (CSD3's Rem4), else a placeholder. A VW
+// over carries its callsigns only in the header and the terminator and its radio IDs only in the frame after the
+// header (ysf-modem.md 4.1), so one joined after those says so rather than naming the mode
+static const char *ysf_caller(const radio_ysf_view_t *y, char *buf, size_t n)
+{
+	if (y->src[0] != '\0')
+		return y->src;
+	if (y->src_id[0] != '\0') {
+		sbuf_t b;
+		sb_init(&b, buf, n);
+		sb_str(&b, TR(YSF_CALLER_ID, "ID "));
+		sb_str(&b, y->src_id);
+		return buf;
+	}
+	return y->mode == RYSF_MODE_VW ? TR(YSF_CALLER_LATE, "Caller unknown") : TR(YSF_CALLER_UNKNOWN, "Fusion");
+}
+
+// The destination heard, or for a VW over joined after its header (no other frame repeats it) a word, not "?"
+static const char *ysf_dest(const radio_ysf_view_t *y)
+{
+	return y->dest[0] != '\0' ? y->dest : y->mode == RYSF_MODE_VW ? TR(YSF_DEST_LATE, "unknown") : "?";
+}
+
+// The mode a Fusion transmission's FICH names: Yaesu's own words, as its radios show them (protocol terms, untranslated)
+static const char *ysf_mode_word(uint8_t mode)
+{
+	switch (mode) {
+	case RYSF_MODE_DN: return "DN";
+	case RYSF_MODE_VD1: return "V/D1";
+	case RYSF_MODE_VW: return "VW";
+	case RYSF_MODE_DATA: return "Data";
+	default: return "";
+	}
+}
+
+// What PTT sends to on a Fusion channel: an arrow, the destination and the DG-ID ("ALL DG-ID 20"), or why it can't
+static void draw_talk_ysf(const radio_view_t *v)
+{
+	const ui_layout_t *L = &ui_layout;
+	const font_t *f = L->medium;
+	const radio_ysf_view_t *y = &v->ysf;
+	char buf[40];
+	sbuf_t b;
+	sb_init(&b, buf, sizeof buf);
+	color_t c = ui_col.fg;
+	if (y->fault == RYSF_NO_PATH || y->fault == RYSF_RX_REFUSED) {
+		sb_str(&b, TR(YSF_WHY_NO_PATH, "Fusion: not on this radio"));
+		c = ui_col.warn;
+	} else if (v->ch.rx_only) {
+		sb_str(&b, TR(WORD_RX_ONLY, "RX only"));
+		c = ui_col.warn;
+	} else if (y->fault == RYSF_NO_CAL) {
+		sb_str(&b, TR(YSF_WHY_NO_CAL, "Fusion TX not calibrated"));
+		c = ui_col.warn;
+	} else if (y->no_call) {
+		sb_str(&b, TR(DENY_WHY_NO_CALLSIGN, "No callsign set"));
+		c = ui_col.warn;
+	} else {
+		// The DG-ID goes first when the line is too long: the destination is what the user picked the channel for
+		sb_str(&b, TEXT_ALT_OPEN);
+		sb_str(&b, y->tx_dest);
+		if (y->tx_dgid != 0) {
+			sb_str(&b, " DG-ID ");
+			sb_u32(&b, y->tx_dgid, 1);
+		}
+		sb_str(&b, TEXT_ALT_NEXT);
+		sb_str(&b, y->tx_dest);
+		sb_str(&b, TEXT_ALT_CLOSE);
+	}
+	char fit[48];
+	int x = gfx_text(f, 0, ui_layout.talk_y, GLYPH_ARROW, ui_col.dim);	// no space, on purpose: as on DMR's talk line
+	gfx_text_fit(f, buf, gfx_width() - x, fit, sizeof fit);
+	gfx_text(f, x, ui_layout.talk_y, fit, c);
+}
+
+#endif
+
 static void draw_talk(const radio_view_t *v, bool label_first)
 {
+#if CONFIG_DSTAR
+	if (v->dstar.on) {
+		draw_talk_dstar(v);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (v->ysf.on) {
+		draw_talk_ysf(v);
+		return;
+	}
+#endif
 #if CONFIG_DMR
 	if (v->ch.mode == RADIO_MODE_DMR) {
 		draw_talk_dmr(v, label_first);
@@ -1222,9 +1477,35 @@ static void draw_chips(const radio_view_t *v, const ui_state_t *s)
 		return;
 	}
 #endif
+#if CONFIG_DSTAR
+	if (v->dstar.on) {
+		draw_chips_dstar(v);
+		return;
+	}
+#endif
 #if CONFIG_DMR
 	if (v->ch.mode == RADIO_MODE_DMR) {
 		draw_chips_dmr(v, s);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (v->ysf.on) {
+		// Fusion: the mode PTT sends (DN, or VW where the channel says so), the DG-ID heard (what the channel listens
+		// to), the power. No tone, width or squelch: the receiver is the engine, which opens on a frame sync
+		x = gfx_text(f, x, y, v->ysf.tx_vw ? "VW" : "DN", ui_col.fg) + f->w;
+		sb_init(&b, buf, sizeof buf);
+		if (v->ysf.rx_dgid != 0) {
+			sb_str(&b, "RX DG-ID ");
+			sb_u32(&b, v->ysf.rx_dgid, 1);
+		} else {
+			sb_str(&b, TR(YSF_CHIP_ALL_DGID, "Any DG-ID"));
+		}
+		if (x + gfx_text_width(f, buf) <= w)
+			x = gfx_text(f, x, y, buf, ui_col.fg) + f->w;
+		const char *pw = ui_power_name(v->power, v->ch.tx_hz);
+		if (x + gfx_text_width(f, pw) <= w)
+			gfx_text(f, x, y, pw, v->power != channel_power(v) ? ui_col.warn : ui_col.fg);
 		return;
 	}
 #endif
@@ -1423,6 +1704,7 @@ static const char *deny_reason(const radio_view_t *v, char *buf, size_t len)
 		}
 		break;
 #endif
+	case TXDENY_NO_CALL: sb_str(&b, TR(DENY_WHY_NO_CALLSIGN, "No callsign set")); break;
 	default: sb_str(&b, TR(DENY_WHY_NOT_ALLOWED, "Not allowed here")); break;
 	}
 	return buf;
@@ -1459,6 +1741,13 @@ static const char *deny_action(const radio_view_t *v)
 			return TR(DENY_FIX_PICK_ANOTHER_CHANNEL, "Pick another channel");	// no setting helps
 		return TR(DENY_FIX_RELEASE_AND_RETRY, "Release PTT, try again");
 #endif
+	case TXDENY_NO_CALL:
+#if CONFIG_YSF
+		// Fusion's callsign is the codeplug's Fusion record (or the radio name); D-STAR's has its own setting
+		if (v->ysf.on)
+			return TR(DENY_FIX_CALLSIGN_IN_CODEPLUG, "Set it in the codeplug");
+#endif
+		return TR(DENY_FIX_SET_CALLSIGN, "Set it: # then My call");
 	default: return TR(DENY_FIX_PICK_ANOTHER_CHANNEL, "Pick another channel");
 	}
 }
@@ -2196,6 +2485,110 @@ static void air_call_line(const air_call_t *c, const font_t *f, int y)
 }
 #endif
 
+#if CONFIG_DSTAR
+static bool dstar_call_screen(const radio_view_t *v)
+{
+	return v->dstar.on && !v->aprs_tx && !v->hotspot && (v->state == RS_TX || v->state == RS_RX);
+}
+
+// Receiving and transmitting on a D-STAR channel: the caller's callsign large with their suffix, where the over went
+// (UR, and the repeaters), their message, the signal; or, sending, our UR and route and the time
+static void draw_dstar_call(const radio_view_t *v, const ui_state_t *s)
+{
+	const ui_layout_t *L = &ui_layout;
+	const radio_dstar_view_t *d = &v->dstar;
+	int w = gfx_width();
+	char buf[64], fit[48];
+	sbuf_t b;
+	gfx_clear(ui_col.bg);
+	bool tx = v->state == RS_TX;
+	int y = ui_draw_top(v, s, NULL, "D-STAR") + 1;
+	if (tx) {
+		const char *word = TR(STATE_TALKING, "TALKING");
+		const font_t *big = gfx_text_width(L->large, word) <= w ? L->large : L->medium;
+		gfx_text_fit(big, word, w, buf, sizeof buf);
+		gfx_text(big, 0, y, buf, ui_col.tx);
+		y += big->h + 2;
+		sb_init(&b, buf, sizeof buf);
+		ui_dstar_ur_text(d, &b, false);
+		y = call_line(L->medium, y, buf, ui_col.fg);
+		sb_init(&b, buf, sizeof buf);
+		if (d->tx_repeater) {
+			sb_str(&b, d->tx_rpt1);
+			sb_str(&b, " > ");
+			sb_str(&b, d->tx_rpt2);
+		} else {
+			sb_str(&b, TR(DSTAR_CHIP_DIRECT, "Direct"));
+		}
+		y = call_line(L->small, y, buf, ui_col.dim);
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, d->tx_my);
+		if (d->tx_suffix[0] != '\0') {
+			sb_chr(&b, '/');
+			sb_str(&b, d->tx_suffix);
+		}
+		y = call_line(L->small, y, buf, ui_col.dim);
+		sb_init(&b, buf, sizeof buf);
+		sb_mmss(&b, v->tx_elapsed_ms / 1000u);
+		if (v->tot_s) {
+			sb_str(&b, TR(PART_OF, " of "));
+			sb_mmss(&b, v->tot_s);
+		}
+		call_line(L->small, y, buf, ui_col.fg);
+		ui_draw_hint(TR(CALL_HINT_RELEASE_PTT, "Release PTT to stop"), false);
+		return;
+	}
+	// Receiving: before the header is in (a late entry) the caller is not known yet
+	sb_init(&b, buf, sizeof buf);
+	sb_str(&b, d->heard && d->my[0] != '\0' ? d->my : TR(STATE_RECEIVING, "Receiving"));
+	const font_t *big = gfx_text_width(L->large, buf) <= w ? L->large : L->medium;
+	gfx_text_fit(big, buf, w, fit, sizeof fit);
+	gfx_text(big, 0, y, fit, ui_col.fg);
+	y += big->h;
+	sb_init(&b, buf, sizeof buf);
+	if (d->suffix[0] != '\0') {
+		sb_chr(&b, '/');
+		sb_str(&b, d->suffix);
+		sb_chr(&b, ' ');
+	}
+	sb_str(&b, "UR ");
+	sb_str(&b, d->ur[0] != '\0' ? d->ur : "-");
+	if (d->heard_slow)
+		sb_str(&b, TR(CALL_CHIP_LATE, " late"));
+	y = call_line(L->small, y, buf, ui_col.dim);
+	if (d->rpt1[0] != '\0' && strcmp(d->rpt1, "DIRECT") != 0) {
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, d->rpt1);
+		sb_str(&b, " > ");
+		sb_str(&b, d->rpt2);
+		y = call_line(L->small, y, buf, ui_col.dim);
+	}
+	if (d->msg[0] != '\0') {
+		char lines[2][64];
+		sb_init(&b, buf, sizeof buf);
+		sb_chr(&b, '"');
+		sb_str(&b, d->msg);
+		sb_chr(&b, '"');
+		int room = (L->hint_y - y) / L->small->h - 1;	// the signal line stays
+		int n = wrap_lines(L->small, buf, w, room >= 2 ? 2 : 1, lines, false);
+		for (int i = 0; i < n; i++)
+			y = call_line(L->small, y, lines[i], ui_col.fg);
+	}
+	if (d->voice_off != RDSTAR_VOICE_OK)
+		y = call_line(L->small, y, d->voice_off == RDSTAR_VOICE_NO_RAM ?
+			TR(DSTAR_WHY_NO_VOICE_RAM, "No RAM for voice") : TR(DSTAR_WHY_NO_AUDIO, "No audio stream"), ui_col.warn);
+	if (y + L->small->h <= L->hint_y) {
+		sb_init(&b, buf, sizeof buf);
+		sb_i32(&b, v->rssi_dbm);
+		sb_str(&b, " dBm");
+		int tw = gfx_text_width(L->small, buf);
+		gfx_text(L->small, w - tw, y, buf, ui_col.fg);
+		draw_meter(0, y + L->small->h / 4, w - tw - L->small->w, L->small->h / 2, v->rssi_dbm);
+	}
+	ui_draw_hint(TR(DSTAR_HINT_ACTIONS, "# D-STAR  PTT replies"), false);
+}
+#endif
+
 static void draw_activity(const radio_view_t *v, const ui_state_t *s)
 {
 	const ui_layout_t *L = &ui_layout;
@@ -2299,6 +2692,12 @@ static void draw_activity(const radio_view_t *v, const ui_state_t *s)
 #if CONFIG_DMR_TRUNK
 		if (v->t3.on && v->t3.state == T3_HUNT && (v->t3.other != 0 || v->t3.other_fid != 0)) {
 			draw_t3_other(v, y);
+			break;
+		}
+#endif
+#if CONFIG_DSTAR
+		if (v->dstar.on) {
+			draw_last_heard_dstar(v, s, y);
 			break;
 		}
 #endif
@@ -2442,6 +2841,96 @@ static void draw_home_large(const radio_view_t *v, const ui_state_t *s)
 	gfx_text(f, 0, y, fit, v->state == RS_TX ? ui_col.tx : v->state == RS_RX ? ui_col.rx : ui_col.fg);
 }
 
+#if CONFIG_YSF
+// Receiving and transmitting on a Fusion channel: the call takes the screen below the status strip, as DMR's does
+static bool ysf_call_screen(const radio_view_t *v)
+{
+	if (!v->ysf.on || v->aprs_tx || v->hotspot)
+		return false;
+	return v->state == RS_TX || (v->state == RS_RX && v->ysf.rx == RYSF_RX_CALL);
+}
+
+static void draw_ysf_call(const radio_view_t *v, const ui_state_t *s)
+{
+	const ui_layout_t *L = &ui_layout;
+	const radio_ysf_view_t *y = &v->ysf;
+	int w = gfx_width();
+	char buf[48], title[40], fit[40];
+	sbuf_t b;
+
+	sb_init(&b, title, sizeof title);
+	sb_str(&b, TR(YSF_TITLE_TO, "to "));
+	sb_str(&b, v->state == RS_TX ? y->tx_dest : ysf_dest(y));
+	gfx_clear(ui_col.bg);
+	int yy = ui_draw_top(v, s, NULL, title) + 1;
+
+	if (v->state == RS_TX) {
+		const char *word = TR(STATE_TALKING, "TALKING");
+		const font_t *big = gfx_text_width(L->large, word) <= w ? L->large : L->medium;
+		gfx_text_fit(big, word, w, buf, sizeof buf);
+		gfx_text(big, 0, yy, buf, ui_col.tx);
+		yy += big->h + 2;
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, y->tx_src);
+		sb_str(&b, " > ");
+		sb_str(&b, y->tx_dest);
+		yy = call_line(L->medium, yy, buf, ui_col.fg);
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, y->tx_vw ? "VW DG-ID " : "DN DG-ID ");
+		sb_u32(&b, y->tx_dgid, 1);
+		if (y->tx_narrow)
+			sb_str(&b, TR(YSF_CHIP_NARROW, " Narrow"));
+		yy = call_line(L->small, yy, buf, ui_col.dim);
+		sb_init(&b, buf, sizeof buf);
+		sb_mmss(&b, v->tx_elapsed_ms / 1000u);
+		if (v->tot_s) {
+			sb_str(&b, TR(PART_OF, " of "));
+			sb_mmss(&b, v->tot_s);
+		}
+		call_line(L->small, yy, buf, ui_col.fg);
+		ui_draw_hint(TR(CALL_HINT_RELEASE_PTT, "Release PTT to stop"), false);
+		return;
+	}
+
+	// Receiving: the caller's callsign large (the DCH brings it within a frame or two on a late entry)
+	char idb[24];
+	const char *who = ysf_caller(y, idb, sizeof idb);
+	const font_t *big = gfx_text_width(L->large, who) <= w ? L->large : L->medium;
+	gfx_text_fit(big, who, w, fit, sizeof fit);
+	gfx_text(big, 0, yy, fit, y->playing || y->src[0] == '\0' ? ui_col.fg : ui_col.dim);
+	yy += big->h;
+	sb_init(&b, buf, sizeof buf);
+	sb_str(&b, ysf_mode_word(y->mode));
+	sb_str(&b, " DG-ID ");
+	sb_u32(&b, y->dgid, 1);
+	if (y->narrow)
+		sb_str(&b, TR(YSF_CHIP_NARROW, " Narrow"));
+	if (y->up[0] != '\0') {
+		sb_str(&b, " via ");
+		sb_str(&b, y->up);
+	}
+	yy = call_line(L->small, yy, buf, ui_col.dim);
+	const char *why = ysf_why(y);
+	if (why != NULL) {
+		yy = call_line(L->small, yy, why, ui_col.warn);
+	} else {
+		sb_init(&b, buf, sizeof buf);
+		sb_str(&b, TR(YSF_TITLE_TO, "to "));
+		sb_str(&b, ysf_dest(y));
+		yy = call_line(L->small, yy, buf, ui_col.fg);
+	}
+	if (yy + L->small->h <= L->hint_y) {
+		sb_init(&b, buf, sizeof buf);
+		sb_i32(&b, v->rssi_dbm);
+		sb_str(&b, " dBm");
+		int tw = gfx_text_width(L->small, buf);
+		gfx_text(L->small, w - tw, yy, buf, ui_col.fg);
+		draw_meter(0, yy + L->small->h / 4, w - tw - L->small->w, L->small->h / 2, v->rssi_dbm);
+	}
+	ui_draw_hint(TR(HINT_PTT_REPLIES, "PTT replies"), false);
+}
+#endif
+
 void ui_draw_home(const radio_view_t *v, const ui_state_t *s)
 {
 #if CONFIG_DUAL_WATCH
@@ -2450,10 +2939,28 @@ void ui_draw_home(const radio_view_t *v, const ui_state_t *s)
 		return;
 	}
 #endif
+#if CONFIG_DSTAR
+	if (dstar_call_screen(v)) {
+		draw_dstar_call(v, s);
+		ui_draw_banner(s);
+		if (s->toast != NULL)
+			ui_draw_hint(s->toast, true);
+		return;
+	}
+#endif
 #if CONFIG_DMR
 	ui_st_dmr_off = s->dmr_off;
 	if (dmr_call_screen(v)) {
 		draw_dmr_call(v, s);
+		ui_draw_banner(s);
+		if (s->toast != NULL)
+			ui_draw_hint(s->toast, true);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (ysf_call_screen(v)) {
+		draw_ysf_call(v, s);
 		ui_draw_banner(s);
 		if (s->toast != NULL)
 			ui_draw_hint(s->toast, true);
@@ -3635,11 +4142,20 @@ uint8_t ui_quick_kind(int pos, const radio_view_t *v)
 	static const uint8_t dmr[UI_QUICK_TILES] = {
 		QT_POWER, QT_TIMESLOT, QT_CC, QT_MODE, QT_HEAR_ALL, QT_PRIVACY, QT_SCAN, QT_TALK_TO, QT_BRIGHTNESS,
 	};
+	// Fusion: the DG-ID sent (what a Pi-Star YSF2DMR maps to a talk group) and the room it asks for; no color code,
+	// timeslot or privacy key, which are DMR's
+	static const uint8_t ysf[UI_QUICK_TILES] = {
+		QT_POWER, QT_DGID, QT_SQUELCH, QT_MODE, QT_MONITOR, QT_ROOM, QT_SCAN, QT_BRIGHTNESS, QT_TONE,
+	};
 	if (pos < 0 || pos >= UI_QUICK_TILES)
 		return QT_POWER;
-	if (!v->vfo && pos == 3)
-		return QT_TO_VFO;	// a channel's tile 4 copies it to the VFO; the VFO's stays Mode
-	uint8_t kind = v->ch.mode == RADIO_MODE_DMR ? dmr[pos] : fm[pos];
+	// A channel's tile 4 is Mode too, now that the mode may be changed there (a temporary change: the radio core does
+	// not write the tag). No tile copies the channel to the VFO: that is the VFO key, which every key map can set
+	// (SK1 on this radio), and the nine tiles stay what each mode needs
+	// The tiles follow the channel's kind as well as its mode: a mode pick reaches the view through the radio task,
+	// while the kind is set at once, so the tiles change with the pick rather than one redraw later
+	uint8_t kind = v->ch.kind == CODEPLUG_KIND_YSF || v->ch.mode == RADIO_MODE_YSF ? ysf[pos] :
+		v->ch.mode == RADIO_MODE_DMR ? dmr[pos] : fm[pos];
 	if (v->vfo && (kind == QT_MONITOR || kind == QT_PRIVACY))
 		return QT_SPLIT;	// the VFO's TX frequency; Monitor stays on its key, privacy on channels
 	return kind;
@@ -3677,6 +4193,8 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 		[QT_TO_VFO] = TRN(QUICK_LABEL_COPY_TO_VFO, TEXT_ALT_OPEN "Copy to VFO"
 			TEXT_ALT_NEXT "To VFO" TEXT_ALT_CLOSE),
 		[QT_SPLIT] = TRN(QUICK_LABEL_TX_FREQ, TEXT_ALT_OPEN "TX freq" TEXT_ALT_NEXT "TXFreq" TEXT_ALT_CLOSE),
+		[QT_DGID] = TRN(QUICK_LABEL_DGID, "DG-ID"),
+		[QT_ROOM] = TRN(QUICK_LABEL_ROOM, "Room"),
 	};
 	uint8_t kind = ui_quick_kind(tile, v);
 	bool editing = s->quick_edit && s->quick_focus == tile;
@@ -3727,9 +4245,10 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 	}
 	case QT_MODE:
 		sb_str(&b, mode_word(v));	// what it is, as every other tile
-		// Only in the VFO (a channel's tile 4 is QT_TO_VFO), in a build with both VFO kinds; it keeps the mode like
-		// its other settings
-		return feat(UI_FEAT_MODE) && v->vfo && CONFIG_VFO_FM && CONFIG_VFO_DMR;
+		// On a channel and in the VFO: a channel's change is temporary (the radio core does not write the tag), and
+		// either way the build needs a second mode to offer
+		return feat(UI_FEAT_MODE) && (CONFIG_VFO_FM || CONFIG_VFO_DMR) && (CONFIG_VFO_FM || CONFIG_FM) &&
+		       (CONFIG_VFO_DMR || CONFIG_DMR || CONFIG_P25 || CONFIG_NXDN || CONFIG_YSF);
 	case QT_TO_VFO:
 		sb_str(&b, TR(QUICK_VALUE_COPY, "Copy"));
 		return CONFIG_VFO_FM || CONFIG_VFO_DMR;	// a channel the VFO can't hold is refused on the press, with the reason
@@ -3777,6 +4296,17 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 	case QT_PRIVACY:
 		sb_str(&b, s->privacy ? TR(VALUE_ON, "On") : TR(VALUE_OFF, "Off"));
 		return feat(UI_FEAT_PRIVACY) && CONFIG_DMR_PRIVACY;
+#endif
+#if CONFIG_YSF
+	case QT_DGID:
+		sb_u32(&b, editing ? s->dgid_edit : v->ysf.tx_dgid, 1);
+		return v->ch.mode == RADIO_MODE_YSF && CONFIG_YSF;
+	case QT_ROOM:
+		// The room this radio asks for: the codeplug record's destination, "ALL" until one is set
+		sb_str(&b, v->ysf.tx_dest[0] != 0 ? v->ysf.tx_dest : TR(VALUE_NONE, "None"));
+		return v->ch.mode == RADIO_MODE_YSF && CONFIG_YSF;
+#endif
+#if CONFIG_DMR
 	case QT_TALK_TO:
 		if (v->dmr.target_private)
 			sb_u32(&b, v->dmr.target_id, 1);

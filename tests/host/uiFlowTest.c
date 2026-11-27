@@ -14,6 +14,7 @@
 #include "ui/ui_app.h"
 #include "ui/ui_screens.h"
 #include "ui/gfx.h"
+#include "codeplug/codeplug.h"	// CODEPLUG_NAME_LEN: the count the text screen shows
 #include "ui/i18n.h"
 #include "ui/gfx.h"
 #include "config.h"
@@ -40,6 +41,10 @@ typedef struct {
 	int budget;
 	bool writes;		// the flow saves on purpose (else: zero codeplug writes)
 } flow_t;
+
+#define STRINGIFY(x)		#x
+#define XSTRINGIFY(x)		STRINGIFY(x)
+#define NAME_COUNT		XSTRINGIFY(CODEPLUG_NAME_LEN)
 
 #define CALLER	"call:9991234,91,g wait:11000 "
 // 143 characters (UI_MSG_TEXT_MAX), the last word LAST
@@ -275,6 +280,20 @@ static const flow_t flows[] = {
 	// The status strip's USB word (#58): IP as a network adapter, with the link arrows once the computer has it up,
 	// none on serial
 	{ "1 USB network: IP on the strip, no link arrows", "usbnet:on", "", "shows=IP nomarkafter=IP", 0, false },
+#if CONFIG_YSF
+	// Fusion (docs/spec/ysf-modem.md 5): Home names the destination; a transmission takes the screen with its caller;
+	// VW is shown and said not to play; PTT shows what goes out
+	{ "1 Fusion channel: the destination", "ysf", "", "screen=home shows=ALL", 0, false },
+	{ "1 Fusion caller", "ysf ysfrx:M0ABC", "", "screen=home shows=M0ABC shows=DN", 0, false },
+	{ "1 Fusion no callsign", "ysfnocall", "", "screen=home shows=No_callsign_set", 0, false },
+	{ "1 Fusion VW joined late", "ysf ysfrx:-,vw", "", "screen=home shows=Caller_unknown shows=to_unknown hides=to_?", 0, false },
+	{ "1 Fusion VW late, radio ID", "ysf ysfrx:-,vw,0,E0abc", "", "screen=home shows=ID_E0abc hides=Caller_unknown", 0, false },
+	{ "1 Fusion DN late, radio ID", "ysf ysfrx:-,dn,0,E0abc", "", "screen=home shows=ID_E0abc", 0, false },
+	{ "1 Fusion transmit", "ysf pttdown", "", "screen=home shows=G4XYZ_>_ALL shows=DN", 0, false },
+	{ "1 Fusion VW played", "ysf ysfrx:JA1YKX,vw,10", "", "screen=home shows=JA1YKX shows=VW hides=not_played", 0, false },
+	{ "1 Fusion transmit in VW", "ysf ysfvw pttdown", "", "screen=home shows=G4XYZ_>_ALL shows=VW", 0, false },
+	{ "1 Fusion VW channel's chip", "ysf ysfvw", "", "screen=home shows=VW", 0, false },
+#endif
 	{ "1 USB network brought up by the PC: the link arrows", "usbnet:up", "", "shows=IP markafter=IP", 0, false },
 	{ "1 USB serial again: no word", "usbnet:on", "usbnet:off", "hides=IP", 0, false },
 	{ "1 USB network: the PC brings the link up, the arrows appear", "usbnet:on", "usbnet:up", "markafter=IP", 0, false },
@@ -542,8 +561,8 @@ static const flow_t flows[] = {
 	  "dual=1 sel=A avfo=1 apos=2 bvfo=1 bpos=1", 1, false },
 	{ "11 dual watch: VFO key, B the VFO, and back", "quick 7 ctx 1 vfokey ctx 1 vfokey", "vfokey",
 	  "dual=1 sel=A avfo=0 apos=3 bvfo=1 bpos=1", 1, false },
-	{ "11 dual watch: Copy to VFO", "quick 7 ctx 3 5 ok", "quick 4 wait:1000", "dual=1 sel=A avfo=1 bpos=5", 2, false },
-	{ "11 dual watch: Copy to VFO, B the VFO", "quick 7 ctx 1 vfokey ctx 1", "quick 4 wait:1000",
+	{ "11 dual watch: the VFO key and the Copy key", "quick 7 ctx 3 5 ok", "vfokey wait:1000", "dual=1 sel=A avfo=1 bpos=5", 2, false },
+	{ "11 dual watch: the VFO key, B the VFO", "quick 7 ctx 1 vfokey ctx 1", "vfokey wait:1000",
 	  "dual=1 sel=A avfo=1 apos=2 bvfo=1 bpos=1", 2, false },
 	// The A/B key only switches; off, it says how to start
 	{ "11 dual watch: A/B with the watch off", "", "abkey", "dual=0 pos=3 toast=Turn_on_dual_watch_first", 1, false },
@@ -589,7 +608,7 @@ static const flow_t flows[] = {
 	{ "21 keep editing", "ok 5 ok down down down down down down down down ok back", "ok", "screen=channel", 1, false },
 	{ "21 discard goes back to Channels", "ok 5 ok down down down down down down down down ok back", "down ok", "screen=channels", 2, false },
 	{ "21 the name opens text entry", "ok 5 ok", "ok", "screen=text", 1, false },
-	{ "21 text entry counts the characters", "ok 5 ok", "ok", "screen=text shows=10/16 hides=010", 1, false },
+	{ "21 text entry counts the characters", "ok 5 ok", "ok", "screen=text shows=10/" NAME_COUNT " hides=010", 1, false },
 	{ "21 a long message wraps", "5 6 3 ctx 3 down down down down ok ctx",
 	  "1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1",
 	  "screen=message-text shows=31/143 hides=1234567890123456789012345678901", 31, false },
@@ -668,6 +687,13 @@ static const flow_t flows[] = {
 	// The contact is whom PTT calls: an RX only channel saves without one (row 6 is RX only, the contact row stays 9)
 	{ "E DMR RX only saves without a TX contact", "ok 5 ok down down down down down down", "ok down down down ok up ok long:ok",
 	  "toast=Saved_channel_3 writes=1", 8, true },
+	// D-STAR and Fusion channels call by the mode's own destination, never a DMR contact: their record is the
+	// receive-only DMR stand-in (channel-modes.md 2.3), and a refusal for its empty contact left Save only with RX only
+	// on, so such a channel could never be made to transmit again on the radio. RX only on, saved, then off, saved
+	{ "E Fusion channel saves TX without a contact", "chkind:3,ysf ok 5 ok down down down down down down",
+	  "ok long:ok ok long:ok", "toast=Saved_channel_3 writes=2 shows=YSF hides=TX_contact hides=Color_code", 4, true },
+	{ "E D-STAR channel saves TX without a contact", "chkind:3,dstar ok 5 ok down down down down down down",
+	  "ok long:ok ok long:ok", "toast=Saved_channel_3 writes=2 shows=DV hides=TX_contact hides=Timeslot", 4, true },
 	// A radio with no transmit band ("rxonly") keeps a DMR channel that is RX only, as any radio does in a receive-only
 	// band. Channel 3 is DMR on 453.625, its RX only row is 6
 	{ "E no transmit band: DMR needs RX only", "rxonly ok 5 ok", "long:ok down down down down down down",
@@ -746,17 +772,17 @@ static const flow_t flows[] = {
 	{ "18 VFO split: transmitting shows the TX frequency", "ok 4 up ok quick 5 up ok back", "pttdown",
 	  "shows=147.120", 1, false },
 	{ "18 a channel keeps Monitor", "down", "quick 5", "hides=TX_freq hides=TXFreq txfreq=147660000", 2, false },
-	{ "18 Copy to VFO from a DMR channel", "", "quick 4", "vfo=1 mode=dmr screen=home toast=Copied_to_VFO temporary=0",
+	{ "18 the VFO key from a DMR channel", "", "copykey", "vfo=1 mode=dmr screen=home toast=Copied_to_VFO temporary=0",
 	  2, false },
-	{ "18 Copy to VFO from an FM channel", "down", "quick 4", "vfo=1 mode=fm freq=147060000 toast=Copied_to_VFO", 2,
+	{ "18 the VFO key from an FM channel", "down", "copykey", "vfo=1 mode=fm freq=147060000 toast=Copied_to_VFO", 2,
 	  false },
-	{ "18 Copy to VFO: a temporary color code goes along", "quick 3 7 ok back", "quick 4", "vfo=1 cc=7 temporary=0",
+	{ "18 the VFO key: a temporary color code goes along", "quick 3 7 ok back", "copykey", "vfo=1 cc=7 temporary=0",
 	  2, false },
-	{ "18 Copy to VFO: the talk target goes along", "tt down ok", "quick 4", "vfo=1 talk=91 temporary=0", 2,
+	{ "18 the VFO key: the talk target goes along", "tt down ok", "copykey", "vfo=1 talk=91 temporary=0", 2,
 	  false },
-	{ "18 Copy to VFO: the channel is unchanged", "quick 3 7 ok back quick 4", "ok 4 ok", "vfo=0 cc=1 temporary=0",
+	{ "18 the VFO key: the channel is unchanged", "quick 3 7 ok back copykey", "ok 4 ok", "vfo=0 cc=1 temporary=0",
 	  3, false },
-	{ "18 Copy to VFO writes no codeplug", "quick 3 7 ok back", "quick 4", "writes=0", 2, false },
+	{ "18 the VFO key writes no codeplug", "quick 3 7 ok back", "copykey", "writes=0", 2, false },
 	{ "19 hear all latched", "", "quick 5", "hearall=1", 2, false },
 	{ "19 hear all off on BACK", "quick 5 back", "back", "hearall=0", 1, false },
 	{ "19 hear all ends with the channel", "quick 5 back", "up", "hearall=0", 1, false },
@@ -950,6 +976,29 @@ static const flow_t flows[] = {
 	{ "S USB network off", "ok 6 4 ok", "ok 6 4 ok", "usbnet=0 toast=USB_is_a_serial", 4, false },
 	{ "S message failed text", "", "", "screen=home", 0, false },
 	// APRS (docs/spec/aprs.md 10): Tools 9, one row each
+#if CONFIG_DSTAR
+	// D-STAR (docs/spec/ui.md 2.6, task-flows.md 28): # on Home opens its page; the shortcuts only set UR and go Home,
+	// where the talk line says what the next over does
+	{ "D D-STAR page from Home", "dstar", "ctx", "screen=dstar focus=Send_to", 1, false },
+	{ "D talk target key opens it too", "dstar", "long:ctx", "screen=dstar", 1, false },
+	{ "D echo test in two presses", "dstar", "ctx 4", "screen=home shows=Echo_test toast=Echo:_talk", 2, false },
+	{ "D echo goes out once", "dstar ctx 4", "ptt", "shows=CQCQCQ hides=Echo_test", 1, false },
+	{ "D unlink in two presses", "dstar", "ctx 6", "screen=home shows=Unlink", 2, false },
+	{ "D link a reflector", "dstar", "ctx 5 7 7 7 3 3 wait:1200 3 3 3 long:0 long:3 long:0 2 2 2 ok",
+	  "screen=home shows=Link_REF030_C", 19, false },
+	{ "D Back on Home: the channel's UR again", "dstar ctx 4", "back", "shows=CQCQCQ toast=Back_to_the", 1, false },
+	{ "D caller and message shown while receiving", "dstar", "dstarrx:M0XYZ,5100,CQCQCQ,Hello_there",
+	  "shows=M0XYZ shows=Hello_there shows=/5100", 0, false },
+	{ "D last caller on Home after the over", "dstar dstarrx:M0XYZ,5100,CQCQCQ,Hello_there", "dstarend",
+	  "screen=home shows=M0XYZ/5100", 0, false },
+	{ "D call the last caller", "dstar dstarrx:M0XYZ,5100,CQCQCQ,Hello dstarend", "ctx 3",
+	  "screen=home shows=M0XYZ_for_now", 2, false },
+	{ "D no callsign: PTT says what to do", "dstar:nocall", "pttdown", "shows=No_callsign_set", 1, false },
+	{ "D my call typed on the radio goes out", "dstar", "ctx 8 6 long:0 2 wait:1200 2 2 wait:1200 9 9 9 9 ok",
+	  "screen=dstar focus=My_call toast=Saved", 12, false },
+	{ "D the typed call is what PTT sends", "dstar ctx 8 6 long:0 2 wait:1200 2 2 wait:1200 9 9 9 9 ok long:back",
+	  "pttdown", "shows=M0ABZ", 1, false },
+#endif
 	{ "A APRS page", "", "ok 6 8", "screen=aprs", 3, false },
 #if CONFIG_DMR_TRUNK
 	// Trunked channels (dmr-trunking.md 12.4): "t3" makes channel 3 a channel of "County" and 5 one of "Metro", not set up
@@ -1332,24 +1381,24 @@ static const flow_t flows_k[] = {
 	  "screen=group shows=SK1 shows=SK1_hold shows=SK2", 3, false },
 	{ "K side key 1: the next choice", "ok 7 8", "down down down ok", "set42=1 shows=Nothing", 4, false },
 #if CONFIG_FM_TX_TONES
-	{ "K side key 1: tone burst", "ok 7 8 down down down ok ok ok ok ok ok ok ok ok ok", "ok",
+	{ "K side key 1: tone burst", "ok 7 8 down down down ok ok ok ok ok ok ok ok ok ok ok", "ok",
 	  "set42=18 shows=Tone_burst", 1, false },
 #endif
 	{ "K side key 1: monitor", "ok 7 8 down down down ok", "ok", "set42=2", 1, false },
 	{ "K side key 1 hold while it monitors (DMR)", "ok 7 8", "down down down down ok", "set43=1", 5, false },
 	{ "K side key 1 hold once it doesn't", "ok 7 8 down down down ok down", "ok", "set43=1", 1, false },
 	{ "K side key 2 hold", "ok 7 8", "down down down down down down ok", "set45=1", 7, false },
-	{ "K top key hold: emergency after scan", "ok 7 8 up ok ok ok ok ok ok ok", "ok", "set47=8 shows=Emergency", 1,
+	{ "K top key hold: emergency after scan", "ok 7 8 up ok ok ok ok ok ok ok ok", "ok", "set47=8 shows=Emergency", 1,
 	  false },
-	{ "K top key hold: copy to VFO", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok", "ok", "set47=14 shows=Copy_to_VFO", 1,
+	{ "K top key hold: copy to VFO", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok", "ok", "set47=14 shows=Copy_to_VFO", 1,
 	  false },
-	{ "K top key hold: VFO/Channel after copy to VFO", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok", "ok",
+	{ "K top key hold: VFO/Channel after copy to VFO", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok", "ok",
 	  "set47=17 shows=VFO/Channel", 1, false },
-	{ "K top key hold: call back last", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok", "ok", "set47=12 shows=Call_back",
+	{ "K top key hold: call back last", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok ok", "ok", "set47=12 shows=Call_back",
 	  1, false },
-	{ "K top key hold wraps to default", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok", "ok", "set47=0", 1,
+	{ "K top key hold wraps to default", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok", "ok", "set47=0", 1,
 	  false },
-	{ "K top key hold: TG name / number after call back", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok ok", "ok",
+	{ "K top key hold: TG name / number after call back", "ok 7 8 up ok ok ok ok ok ok ok ok ok ok ok ok ok ok", "ok",
 	  "set47=19 shows=TG_name", 1, false },
 	{ "K a key set to power", "", "powerkey", "power=5", 1, false },
 	{ "K a key set to power, long", "", "long:powerkey", "power=5", 1, false },
@@ -1397,6 +1446,13 @@ static const flow_t flows_k[] = {
 	  false },
 	{ "K monitor key on DMR: digital monitor", "", "mon", "hearall=1 toast=Digital_monitor_on", 1, false },
 	{ "K monitor key on DMR, again: off", "mon", "mon", "hearall=0 toast=Digital_monitor_off", 1, false },
+	// Monitor toggle (KEYFN_MONITOR_TOGGLE) does what quick tile 5 does: FM latches the squelch open, DMR digital monitor
+	{ "K a key set to monitor toggle, FM: latched", "down", "monkey", "monitor=1", 1, false },
+	{ "K a key set to monitor toggle, FM: again closes it", "down monkey", "monkey", "monitor=0", 1, false },
+	{ "K a key set to monitor toggle, FM, long press", "down", "long:monkey", "monitor=1", 1, false },
+	{ "K a key set to monitor toggle, DMR: digital monitor", "", "monkey", "hearall=1 toast=Digital_monitor_on", 1, false },
+	{ "K a key set to monitor toggle, DMR: again off", "monkey", "monkey", "hearall=0 toast=Digital_monitor_off", 1, false },
+	{ "K a key set to monitor toggle, DMR, long press", "", "long:monkey", "hearall=1", 1, false },
 	{ "K a key set to key lock", "", "lockkey", "locked=1", 1, false },
 	{ "K key lock unlocks too", "lockkey", "lockkey", "locked=0", 1, false },
 	{ "K call back: the last talkgroup", CALLER, "cbkey ptt", "txid=91 txpriv=0", 2, false },

@@ -14,9 +14,10 @@ CONFIG_DISPLAY_INSET_LEFT ?= 2
 CONFIG_APRS_IGATE ?= n
 MAXIMAL_VARS := LTO=1
 # Left out of tools/ci.sh's maximal configuration: PPP stands in for the USB network adapter on UART-only radios
-# (docs/spec/ppp.md), and this one has the adapter; the APRS iGate is off by default (above); French, off by
-# default, so that the maximal build keeps satellite tracking and still fits the app region; Chinese stays out too
-# (its glyph table does not fit beside the rest)
+# (docs/spec/ppp.md), and this one has the adapter; the APRS iGate is off by default (above); French, off by default,
+# so that the maximal build keeps satellite tracking and still fits the app region; Chinese too, whose code point index
+# and pinyin search fill the app region beside every other switch (36 KB over). The `chinese` extra builds it instead,
+# without satellite tracking (board.toml). Only its bitmaps live in the data flash (below), not its index or text
 MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR LANG_ZH LANG_DEFAULT_ZH
 
 # What the radio's hardware can't do, one switch per line with the reason (tools/boards.py checks there is one;
@@ -31,7 +32,13 @@ BOARD_UNSUPPORTED += NAND_STORAGE	# the data flash is a 16 MB SPI NOR (docs/spec
 BOARD_UNSUPPORTED += VIBRATE	# no vibration motor (docs/user/23-radios.md, What the MD-UV380 lacks)
 BOARD_UNSUPPORTED += FAULT_TRACE	# needs a host UART: the host port is USB, and the one UART is the G models' GPS line
 
-# Chinese (CONFIG_LANG_ZH): a 160x128 panel is the 160 px class, whose layout moves its words up to the 8x16 font while
-# a wide language is in use (core/ui/ui_screens.c, docs/spec/ui.md 2.5), so a 16 px CJK glyph fits; Home then has no
-# zone line and a list shows 5 rows instead of 7. Off by default like on every radio. Its glyph table (about 27 KB,
-# docs/feature-matrix.md) is far smaller than the old GB2312 one: the `chinese` CI extra builds it beside the default build
+# Chinese on this radio: a 12 px cell (CONFIG_CJK_CELL), the size of the 6x12 font this 160 px class already draws its
+# words in, so the layout stays as it is in English instead of moving up to the 8x16 one. With the full GB2312 face
+# (tools/cjkfont.py --gb2312) any name a user types draws, and with CONFIG_PINYIN a Chinese name is entered on the
+# radio. Those two tables do not fit the app region (176 KB of glyphs and 32 KB of pinyin tables), so that build keeps
+# them in the data flash at 0xF40000 and 0xF6C000 (below) and `rfoundry font` writes them there. Off by default like
+# Chinese on every radio: the `chinese` CI extra builds it, and a radio without the blob burned in draws boxes
+CONFIG_CJK_CELL ?= 12
+BOARD_NOT_WRITTEN += DSTAR	# no flat FM paths in board.audio_tap (docs/spec/dstar-modem.md 1.1)
+BOARD_NOT_WRITTEN += YSF	# the same flat FM paths Fusion runs on (docs/spec/ysf-modem.md 1.1)
+BOARD_NOT_WRITTEN += YSF_VW	# Voice FR rides on Fusion, not written here either

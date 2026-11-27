@@ -34,6 +34,7 @@ character is regenerated from the same font and not from memory (docs/dev/transl
 """
 import argparse
 import hashlib
+import json
 import os
 import re
 import sys
@@ -44,6 +45,18 @@ CELL = 16				# pixels square; the height of the 8x16 Latin font
 BITS_PER_ROW = CELL
 ROW_BYTES = (BITS_PER_ROW + 7) // 8
 GLYPH_BYTES = CELL * ROW_BYTES
+
+
+def set_cell(size):
+    """Set the cell size for this run. The firmware's cjk_font.h carries the same numbers, and they must agree: the
+    text layer draws CJK_FONT_H rows of CJK_FONT_ROW_BYTES bytes for every character above U+00FF."""
+    global CELL, BITS_PER_ROW, ROW_BYTES, GLYPH_BYTES
+    if size < 8 or size > 32:
+        raise SystemExit("cjkfont: --cell %d is outside 8..32" % size)
+    CELL = size
+    BITS_PER_ROW = CELL
+    ROW_BYTES = (BITS_PER_ROW + 7) // 8
+    GLYPH_BYTES = CELL * ROW_BYTES
 
 # A full-width ideograph: a CJK font's layout box for it is its em square, which is the cell every glyph is drawn in
 EM_REF = "\u56fd"			# 国
@@ -100,6 +113,26 @@ def gb2312_level1():
                 chars.add(bytes([hb, lb]).decode("gb2312"))
             except UnicodeDecodeError:
                 pass
+    return chars
+
+
+def gb2312_all():
+    """Every character GB2312 codes (7445: the 3755 of level 1, 3008 of level 2 and the symbol rows): the whole set a
+    Chinese codeplug or a user's own name can hold, drawn so no channel name meets a box.
+
+    The catalog's own characters are added too. A Chinese build draws every non-ASCII character of a msgstr from this
+    table, and the interface uses a few marks GB2312 does not code (the arrows in the import and export rows): without
+    them those rows show a box in a Chinese build while the English one draws them from its Latin font.
+    """
+    chars = set()
+    for hb in range(0xA1, 0xFF):
+        for lb in range(0xA1, 0xFF):
+            try:
+                ch = bytes([hb, lb]).decode("gb2312")
+            except UnicodeDecodeError:
+                continue
+            if len(ch) == 1:
+                chars.add(ch)
     return chars
 
 
@@ -173,39 +206,76 @@ def license_lines(path):
     return lines
 
 
+def index_hash(glyphs):
+    """FNV-1a over the code points in order: the value the firmware's cjk_font_index_hash must have for this table."""
+    h = 2166136261
+    for cp, _, _ in glyphs:
+        h = ((h ^ (cp & 0xFF)) * 16777619) & 0xFFFFFFFF
+        h = ((h ^ (cp >> 8)) * 16777619) & 0xFFFFFFFF
+    return h
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build the firmware's CJK glyph table (docs/dev/translating.md)")
     ap.add_argument("--font", required=True, help="an outline font whose license allows embedding bitmaps")
+    ap.add_argument("--cell", type=int, default=16,
+                    help="the glyph cell in pixels: 16 for the 8x16 Latin line, 12 where a layout draws its words in "
+                         "the 6x12 font (core/ui/cjk_font.h carries the same numbers)")
     ap.add_argument("--font-index", type=int, default=0, help="a face inside a .ttc (default 0)")
     ap.add_argument("--weight", type=int, default=500, help="the variable font's weight axis (0: its default)")
-    ap.add_argument("--supersample", type=int, default=2, help="render this much larger, then shrink (default 2)")
+    ap.add_argument("--supersample", type=int, default=2, help="render this much larger, then shrink (default 2; use 1 "
+                    "for a bitmap font, which has glyphs at its own size only)")
+    ap.add_argument("--size", type=int, help="the pixel size to load the font at (default: the cell times --supersample)")
     ap.add_argument("--threshold", type=int, default=100, help="coverage that counts as ink, 0-255 (default 100)")
     ap.add_argument("--po", help="take the characters from a gettext catalog's msgstr lines")
     ap.add_argument("--text", help="take the characters from this text instead")
     ap.add_argument("--chars-file", help="also take the characters from a UTF-8 name list (# comments ignored)")
+    ap.add_argument("--flash-po",
+                    help="with a table built for the data flash: the catalog whose characters the shape for a build "
+                         "that keeps its glyphs in the image covers (the 720 KB a radio has cannot hold every GB2312 "
+                         "character; the flash shape has room for them)")
+
     ap.add_argument("--gb2312-level1", action="store_true",
-                    help="also the 3755 common ideographs (GB2312 level 1), so Chinese channel names draw")
+                    help="also take the 3755 level 1 (common) ideographs of GB2312")
+    ap.add_argument("--gb2312", action="store_true",
+                    help="also take every character GB2312 codes (7445): the whole set a Chinese codeplug or a user's "
+                         "own name can hold, so no channel name draws a box")
     ap.add_argument("--font-name", default="", help="the font and its version, for the generated file's notice")
     ap.add_argument("--copyright", required=True, help="the font's copyright line (SPDX-FileCopyrightText)")
     ap.add_argument("--license", required=True, help="the font's license text, carried in the generated file")
     ap.add_argument("--spdx", required=True, help="the font data's SPDX license identifier (e.g. OFL-1.1)")
     ap.add_argument("--out-c", required=True, help="the C file to write")
+    ap.add_argument("--out-bin",
+                    help="write the glyph bitmaps to this binary too, for a font flash holds (a board whose data "
+                         "flash keeps the face): the C file then carries the code point index only, and the lookup "
+                         "reads a glyph from that address (core/ui/cjk_font.c)")
+    ap.add_argument("--out-addr", default="0",
+                    help="the flash address --out-bin is burned at, as the table reports it")
     ap.add_argument("--out-png", help="a preview image to write")
     args = ap.parse_args()
+    set_cell(args.cell)
 
-    if not args.po and not args.text:
-        ap.error("give --po or --text")
-    chars = chars_from_po(args.po) if args.po else set(args.text)
+    if not args.po and not args.text and not args.chars_file and not args.gb2312_level1 and not args.gb2312:
+        ap.error("give --po, --text, --chars-file, --gb2312-level1 or --gb2312")
+    chars = chars_from_po(args.po) if args.po else (set(args.text) if args.text else set())
     if args.chars_file:
         chars |= chars_from_file(args.chars_file)
     if args.gb2312_level1:
         chars |= gb2312_level1()
+    if args.gb2312:
+        chars |= gb2312_all()
+        # The whole-GB2312 set is what a Chinese build draws *every* non-ASCII character from, so the marks that a
+        # catalog leaves to the Latin font (MACRO_CHARS: the arrows in the import and export rows) need a glyph here
+        # too. GB2312 does not code them, and the Latin face these builds use stops at U+0084, so without this the
+        # rows draw a box in Chinese while English draws the mark.
+        chars |= set(MACRO_CHARS)
     chars = sorted(ch for ch in chars if codepoint_ok(ord(ch)) and not ch.isspace())
     if not chars:
         ap.error("no characters to build")
 
-    font = load_font(args.font, CELL * args.supersample, args.weight, args.font_index)
-    window = em_box(font, CELL * args.supersample)
+    size = args.size or CELL * args.supersample
+    font = load_font(args.font, size, args.weight, args.font_index)
+    window = em_box(font, size)
     glyphs, missing = [], []
     for ch in chars:
         rows = to_rows(rasterize(font, ch, window, args.threshold))
@@ -218,8 +288,48 @@ def main():
     if not glyphs:
         ap.error("every character came out blank")
 
+    # The face a build that keeps its glyphs in the image gets: the catalog's characters and the name list, which is
+    # all such a board has room for. --flash-po names them when the table the file's first shape covers is wider (a
+    # board that reads its glyphs from the data flash can afford every GB2312 character; one that carries them in its
+    # 720 KB image cannot). Without it the two shapes cover the same characters.
+    flash_chars = None
+    if args.flash_po:
+        flash_chars = chars_from_po(args.flash_po)
+        if args.chars_file:
+            flash_chars |= chars_from_file(args.chars_file)
+        flash_chars = sorted(ch for ch in flash_chars if codepoint_ok(ord(ch)) and not ch.isspace())
+
+    flash_glyphs = []
+    if flash_chars is not None:
+        for ch in flash_chars:
+            rows = to_rows(rasterize(font, ch, window, args.threshold))
+            if not any(any(row) for row in rows):
+                continue
+            flash_glyphs.append((ord(ch), ch, rows))
+        if not flash_glyphs:
+            ap.error("--flash-po's characters all came out blank")
+
     if args.out_png:
         write_preview([rows for _, _, rows in glyphs], args.out_png)
+
+    if args.out_bin:
+        # One glyph after the other in code point order, CELL rows of ROW_BYTES each: the lookup multiplies the
+        # index of the code point in cjk_font_cp by GLYPH_BYTES and reads from cjk_font_addr + that. The data flash
+        # erases in 4 KB sectors, so the file is padded to a whole sector with 0xFF (the glyphs end before the pad)
+        blob = b"".join(b"".join(rows) for _, _, rows in glyphs)
+        pad = (-len(blob)) % 0x1000
+        with open(args.out_bin, "wb") as fb:
+            fb.write(blob)
+            fb.write(b"\xff" * pad)
+        # A small record beside the blob: what the firmware's cjk_font_index_hash must say for these bytes to be the
+        # ones it expects. A tool compares them before writing, so a firmware and a font from different runs are caught
+        meta = {"glyphs": len(glyphs), "cell": CELL, "bytes": len(blob) + pad,
+                "index_hash": "0x%08X" % index_hash(glyphs)}
+        with open(args.out_bin + ".json", "w", encoding="utf-8", newline="\n") as fj:
+            json.dump(meta, fj, indent=1, sort_keys=True)
+            fj.write("\n")
+        print("cjkfont: %s holds %d glyphs, %d bytes of glyphs, %d bytes padded to whole 4 KB sectors"
+              % (args.out_bin, len(glyphs), len(blob), len(blob) + pad))
 
     name = args.font_name or os.path.basename(args.font)
     with open(args.font, "rb") as f:
@@ -246,17 +356,39 @@ def main():
         f.write("\n")
         f.write('#include "cjk_font.h"\n\n')
         f.write("#if CONFIG_LANG_ZH\n")
+        # Two shapes in one file, chosen by CONFIG_CJK_FONT_IN_FLASH. A build that carries the glyphs in its image has
+        # room for the catalog's own characters; one that reads them from the data flash can cover every GB2312
+        # character. Each shape brings its own code point table, because the count differs.
+        f.write("#if CONFIG_CJK_FONT_IN_FLASH\n")
+        f.write("// The glyphs are in the data flash at CONFIG_CJK_FONT_ADDR, in the order of the code points above\n")
         f.write("const uint16_t cjk_font_cp[] = {\n")
         for i, (cp, _, _) in enumerate(glyphs):
             f.write("\t0x%04X,%s" % (cp, "\n" if i % 8 == 7 or i == len(glyphs) - 1 else " "))
         f.write("};\n\n")
+        f.write("const uint16_t cjk_font_count = %d;\n\n" % len(glyphs))
+        f.write("const uint32_t cjk_font_addr = CONFIG_CJK_FONT_ADDR;\n")
+        # The index's own FNV-1a: a radio says which table it was built with, and a tool can tell whether the bytes in
+        # the data flash are the ones this index reads (the glyph at slot i must be cjk_font_cp[i])
+        f.write("const uint32_t cjk_font_index_hash = 0x%08Xu;\n" % index_hash(glyphs))
+        f.write("#else\n")
+        flash = flash_glyphs if flash_glyphs else glyphs
+        f.write("// The glyphs are in this image: the characters the catalogs and the names list use\n")
+        f.write("const uint16_t cjk_font_cp[] = {\n")
+        for i, (cp, _, _) in enumerate(flash):
+            f.write("\t0x%04X,%s" % (cp, "\n" if i % 8 == 7 or i == len(flash) - 1 else " "))
+        f.write("};\n\n")
+        f.write("const uint16_t cjk_font_count = %d;\n\n" % len(flash))
         f.write("const uint8_t cjk_font_bits[] = {\n")
-        for cp, ch, rows in glyphs:
+        for cp, ch, rows in flash:
             f.write("\t/* U+%04X \"%s\" */\n" % (cp, c_bytes(ch)))
             for row in rows:
                 f.write("\t" + ", ".join("0x%02X" % b for b in row) + ",\n")
-        f.write("};\n\n")
-        f.write("const uint16_t cjk_font_count = %d;\n" % len(glyphs))
+        f.write("};\n")
+        # The same kinds of value the data flash shape declares, so a build with CONFIG_CJK_FONT_IN_FLASH off still
+        # has them: the debug link reports the table's identity whatever shape the build has
+        f.write("const uint32_t cjk_font_addr = 0;\n")
+        f.write("const uint32_t cjk_font_index_hash = 0x%08Xu;\n" % index_hash(flash))
+        f.write("#endif\n")
         f.write("#endif\n")
 
     print("cjkfont: %d glyphs of %dx%d, %d bytes of bitmap, %d bytes of code points"

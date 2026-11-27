@@ -125,8 +125,18 @@ static inline bool nxdn_ok(void)
 #endif
 }
 
-// An air-framed mode this build runs (P25, NXDN): the radio core runs it with the board in its digital mode
+// An air-framed mode this build runs on the modem (P25, NXDN, Fusion): the radio core runs it with the board in its
+// digital mode, the DMR stack stopped
 static inline bool air_mode(uint8_t mode)
+{
+	return (CONFIG_P25 && mode == RADIO_MODE_P25) || (CONFIG_NXDN && mode == RADIO_MODE_NXDN) ||
+	       (CONFIG_YSF && mode == RADIO_MODE_YSF);
+}
+
+// The modes the core drives through the shared air session (core/air/air_session.c): a retune, PTT and the transmit
+// poll. Fusion is an air mode but not one of these: its own engine carries the chip's interface (radio_ysf.c), so its
+// keying and its transmit poll are the YSF branch's, and the generic ones would key it with no Fusion frame in it
+static inline bool air_session_mode(uint8_t mode)
 {
 	return (CONFIG_P25 && mode == RADIO_MODE_P25) || (CONFIG_NXDN && mode == RADIO_MODE_NXDN);
 }
@@ -223,9 +233,10 @@ static void activity(radio_sm_t *sm, uint32_t now_ms)
 // Whether a voice stream (DMR or P25) owns the PCM audio: beeps are mixed into it
 static inline bool voice_streaming(void)
 {
-	bool on = false;
+	// D-STAR's codec and Fusion's vocoder frames play and record on the same PCM stream as DMR's vocoder
+	bool on = radio_dstar_streaming() || radio_ysf_streaming();
 #if CONFIG_DMR
-	on = ambeVoiceStreaming();
+	on = on || ambeVoiceStreaming();
 #endif
 #if CONFIG_P25 && CONFIG_IMBE
 	on = on || p25VoiceStreaming();
@@ -636,7 +647,7 @@ static void deny_led_start(radio_sm_t *sm)
 // A channel of a kind the radio doesn't run (docs/spec/channel-modes.md 6): tuned to its frequency but silent, never
 // scanned and never keyed, whatever its record says. A built kind's mode module took its channel when it was read
 // (channel_read), which gave it the mode's own: P25 or NXDN. A Tier III channel runs on its record's DMR (the
-// trunking engine follows its system)
+// trunking engine follows its system), a D-STAR or Fusion one as FM that its module takes over (load_channel)
 static bool parked(const channel_t *ch)
 {
 	if (ch->kind == CODEPLUG_KIND_NONE) {
@@ -647,7 +658,8 @@ static bool parked(const channel_t *ch)
 	}
 	if (ch->kind == CODEPLUG_KIND_DMR_AES)
 		return ch->mode != RADIO_MODE_DMR;
-	return ch->kind != CODEPLUG_KIND_DMR_TRUNK && ch->mode != RADIO_MODE_P25 && ch->mode != RADIO_MODE_NXDN;
+	return ch->kind != CODEPLUG_KIND_DMR_TRUNK && ch->mode != RADIO_MODE_P25 && ch->mode != RADIO_MODE_NXDN &&
+	       !radio_dstar_kind(ch) && !radio_ysf_kind(ch);
 }
 
 // Channel number from the codeplug as the radio runs it: the mode module of its kind takes it
@@ -672,6 +684,17 @@ static void outputs(radio_sm_t *sm)
 {
 	bool tx = sm->view.state == RS_TX;
 	bool fm = sm->view.ch.mode == RADIO_MODE_FM && !sm->hotspot && !parked(&sm->view.ch);
+	bool dstar = false, ysf = false;
+#if CONFIG_DSTAR
+	// D-STAR's speaker is the PCM stream's (radio_dstar.c routes it): the receiver's own FM audio stays off
+	dstar = fm && radio_dstar_running();
+#endif
+#if CONFIG_YSF
+	// Fusion's likewise (radio_ysf.c). At most one of the two runs: a channel has one kind
+	ysf = !tx && !sm->hotspot && !parked(&sm->view.ch) &&
+	      (sm->view.ch.mode == RADIO_MODE_FM || sm->view.ch.mode == RADIO_MODE_YSF) && radio_ysf_running();
+#endif
+	fm = fm && !dstar && !ysf;
 	bool open = !tx && fm && (sm->view.monitor || sm->view.state == RS_RX || (sm->view.state == RS_TX_DENIED && sm->deny_rx));
 	bool green = open;
 #if CONFIG_P25
@@ -683,6 +706,16 @@ static void outputs(radio_sm_t *sm)
 #if CONFIG_NXDN
 	if (sm->view.ch.mode == RADIO_MODE_NXDN && !tx && sm->view.state == RS_RX &&
 	    (sm->view.nxdn.flags & RADIO_NXDN_PLAYED) != 0) {
+		green = true;
+	}
+#endif
+#if CONFIG_DSTAR
+	if (dstar && !tx && radio_dstar_playing()) {
+		green = true;
+	}
+#endif
+#if CONFIG_YSF
+	if (ysf && !tx && radio_ysf_playing()) {
 		green = true;
 	}
 #endif
@@ -885,6 +918,12 @@ static void tune(radio_sm_t *sm, uint32_t now_ms)
 	cw_cancel(sm);		// the repeater's ID: the board is set up for the channel below
 #endif
 	end_reception(sm, now_ms);
+#if CONFIG_DSTAR
+	radio_dstar_stop();	// before the board is set up again; started below when the channel is still D-STAR
+#endif
+#if CONFIG_YSF
+	radio_ysf_stop();	// before the board is set up again; started below when the channel is still Fusion
+#endif
 #if CONFIG_APRS_RX
 	// Off the APRS frequency (or out of FM): APRS lets go of the FM receive audio before the board changes mode. A
 	// P25, NXDN or YSF engine can't start while it holds it (HR_C7000: air_take), and nothing retries the start until
@@ -924,7 +963,10 @@ static void tune(radio_sm_t *sm, uint32_t now_ms)
 		dmr_end(sm);		// the call stack (or an air mode) lets go of the modem before the chip leaves DMR
 	}
 #if CONFIG_AIR
-	if (!air && air_running()) {
+	// A channel of the shared air session's own (P25, NXDN): leave that. Fusion is the board's DMR mode too but runs
+	// its own engine, so a P25 or NXDN engine still up must be closed before Fusion's start, or air_running keeps this
+	// poll out of Fusion's branch for as long as it runs
+	if (!air_session_mode(sm->view.ch.mode) && air_running()) {
 		air_stop(sm);		// to DMR: the engine closes and the vocoder's memory is back before DMR starts
 	}
 #endif
@@ -950,6 +992,22 @@ static void tune(radio_sm_t *sm, uint32_t now_ms)
 #if CONFIG_AIR
 	if (air) {
 		air_begin(sm);
+	}
+#endif
+#if CONFIG_DSTAR
+	if (radio_dstar_kind(&sm->view.ch) && !sm->view.am && !sm->view.bcast && !sm->hotspot) {
+		radio_dstar_start(sm->view.vfo ? 0 : sm->view.channel_number, &sm->view.ch, now_ms);	// after rx()
+		radio_dstar_view(&sm->view.dstar);
+	} else {
+		sm->view.dstar.on = false;
+	}
+#endif
+#if CONFIG_YSF
+	if (radio_ysf_kind(&sm->view.ch) && !sm->view.am && !sm->view.bcast && !sm->hotspot) {
+		radio_ysf_start(sm->view.vfo ? 0 : sm->view.channel_number, &sm->view.ch, now_ms);	// after rx()
+		radio_ysf_view(&sm->view.ysf);
+	} else {
+		sm->view.ysf.on = false;
 	}
 #endif
 	outputs(sm);
@@ -1127,6 +1185,29 @@ static void load_channel(radio_sm_t *sm, const channel_t *ch)
 #if !CONFIG_SUBTONE
 	sm->view.ch.rx_tone = sm->view.ch.tx_tone = (subtone_t){ TONE_NONE, 0 };	// built without CTCSS / DCS
 #endif
+#if CONFIG_DSTAR
+	if (radio_dstar_kind(&sm->view.ch)) {
+		// The record under a D-STAR tag is a receive-only DMR stand-in (channel-modes.md 2.3): to the rest of the
+		// core the channel is narrow FM without sub-audio, and radio_dstar.c takes over the squelch, the speaker
+		// and what goes on air
+		sm->view.ch.mode = RADIO_MODE_FM;
+		sm->view.ch.bw = RADIO_BW_12K5;
+		sm->view.ch.rx_tone = sm->view.ch.tx_tone = (subtone_t){ TONE_NONE, 0 };
+	}
+#endif
+#if CONFIG_YSF
+	if (radio_ysf_kind(&sm->view.ch)) {
+		// The record under a Fusion tag is a receive-only DMR stand-in (channel-modes.md 2.3), and radio_ysf.c takes
+		// over the squelch, the speaker and what goes on air. Which mode the board is put in depends on the route
+		// (ysf-modem.md 1.7): a flat FM tap needs FM, but the chip's FM copy only exists while the board is in its
+		// digital mode, where the DMR engine holds the chip (an HR_C6000 radio: dmr_glue.c's air_open refuses with
+		// no session). The 25 kHz setting either way: the wide deviation's outer symbols are 2.7 kHz with peaks near
+		// 4 kHz, past what a 12.5 kHz setting's transmit limiter is set for (ysf-modem.md 1.3)
+		sm->view.ch.mode = RADIO_MODE_YSF;
+		sm->view.ch.bw = RADIO_BW_25K;
+		sm->view.ch.rx_tone = sm->view.ch.tx_tone = (subtone_t){ TONE_NONE, 0 };
+	}
+#endif
 	sm->base_bw = sm->view.ch.bw;
 	sm->base_rx_tone = sm->view.ch.rx_tone;
 	sm->base_tx_tone = sm->view.ch.tx_tone;
@@ -1259,8 +1340,15 @@ radio_vfo_copy_t radio_vfo_copy_check(const channel_t *ch, bool in_vfo)
 	if (in_vfo) {
 		return VFO_COPY_ALREADY;
 	}
-	if (ch->kind != CODEPLUG_KIND_NONE || (ch->mode == RADIO_MODE_DMR ? !CONFIG_VFO_DMR : !CONFIG_VFO_FM)) {
-		return VFO_COPY_NO_MODE;	// the VFO holds plain FM and DMR only
+	// The VFO holds plain FM, DMR, and Fusion where the radio runs it (its mode tile offers C4FM): a Fusion channel
+	// is a kinded one whose kind the VFO takes over (mode_allowed lets it go again). P25 and NXDN channels stay out
+	bool ysf = false;
+#if CONFIG_YSF
+	ysf = radio_ysf_kind(ch) && radio_ysf_fits();
+#endif
+	if ((ch->kind != CODEPLUG_KIND_NONE && !ysf) ||
+	    !(ch->mode == RADIO_MODE_DMR ? CONFIG_VFO_DMR : ch->mode == RADIO_MODE_YSF ? ysf : CONFIG_VFO_FM)) {
+		return VFO_COPY_NO_MODE;
 	}
 	if (!board_in_band(ch->rx_hz, false) || (ch->tx_hz != 0 && !board_in_band(ch->tx_hz, false))) {
 		return VFO_COPY_OUT_OF_BAND;
@@ -1292,6 +1380,9 @@ static void vfo_copy(radio_sm_t *sm, uint32_t now_ms)
 	v->rx_hz = c->rx_hz;
 	v->tx_hz = c->tx_hz != 0 && !c->dmo ? c->tx_hz : c->rx_hz;
 	v->mode = c->mode;
+	// Fusion needs its kind too: the mode alone is not what radio_ysf_kind reads, and the VFO runs the module only
+	// for a channel that is one (a plain FM or DMR copy drops it again)
+	v->kind = c->kind == CODEPLUG_KIND_YSF ? CODEPLUG_KIND_YSF : CODEPLUG_KIND_NONE;
 	v->bw = c->bw;
 	v->power = sm->temp_power ? sm->view.power : c->power;
 	if (c->mode == RADIO_MODE_DMR) {
@@ -1305,6 +1396,8 @@ static void vfo_copy(radio_sm_t *sm, uint32_t now_ms)
 		sm->vfo_talk_id = sm->manual ? sm->manual_id : sm->talk_id;
 		sm->vfo_talk_private = sm->manual ? sm->manual_private : sm->talk_private;
 #endif
+	} else if (c->mode == RADIO_MODE_YSF) {
+		v->rx_tone = v->tx_tone = (subtone_t){ TONE_NONE, 0 };	// the mode sets its own, as a channel's does
 	} else {
 		v->rx_tone = c->rx_tone;	// a DMR channel has no tones: the VFO keeps its own for its FM mode
 		v->tx_tone = c->tx_tone;
@@ -4488,11 +4581,12 @@ static void dmr_end(radio_sm_t *sm) { (void)sm; }
 #if CONFIG_SCAN
 // A channel scan and dual watch can listen to (number: where it is stored, 0 the VFO): not parked, and one a stop can
 // judge. A P25 trunked channel is left out: it follows its system's control channel, nothing a stop of a few hundred
-// milliseconds decides, and so is a Tier III one. An NXDN channel at a rate the board's air interface can't receive hears nothing
+// milliseconds decides, and so is a Tier III one. An NXDN channel at a rate the board's air interface can't receive hears nothing.
+// Nor does a D-STAR or Fusion channel: its receiver is the engine, which a scan's dwell is too short to start and judge
 static bool scan_listens(const channel_t *ch, uint16_t number)
 {
 	(void)number;
-	if (parked(ch) || codeplug_kind_trunked(ch->kind)) {
+	if (parked(ch) || codeplug_kind_trunked(ch->kind) || radio_dstar_kind(ch) || radio_ysf_kind(ch)) {
 		return false;
 	}
 #if CONFIG_NXDN
@@ -4722,7 +4816,7 @@ static bool rx2_settings(radio_sm_t *sm, uint8_t i, rx2_tune_t *t)
 	} else if (dual_read(sm, r, &buf, &ch) == NULL) {
 		return false;
 	}
-	if (air_mode(ch.mode)) {
+	if (air_session_mode(ch.mode)) {
 		return false;	// the second receiver takes FM and DMR: the main one alternates onto a P25 or NXDN channel
 	}
 	t->rx_hz = ch.rx_hz;
@@ -5981,6 +6075,12 @@ static void aprs_rf_start(radio_sm_t *sm, uint32_t now_ms)
 	if (sm->board_mode == RADIO_MODE_DMR) {
 		dmr_end(sm);		// the call stack lets go of the modem before the chip leaves DMR
 	}
+#if CONFIG_DSTAR
+	radio_dstar_stop();	// the beacon's frequency in plain FM; aprs_rf_end's tune starts it again
+#endif
+#if CONFIG_YSF
+	radio_ysf_stop();	// the beacon's frequency in plain FM; aprs_rf_end's tune starts it again
+#endif
 	if (sm->board_mode != RADIO_MODE_FM) {
 		sm->board_mode = RADIO_MODE_FM;
 		board.radio->set_mode(RADIO_MODE_FM);
@@ -6076,7 +6176,7 @@ static void aprs_poll(radio_sm_t *sm, uint32_t now_ms)
 #if CONFIG_APRS_AFSK
 	r.can_rf = aprs_can_start(sm);
 	r.fm_rx = sm->aprs_phase == APRS_RF_OFF && sm->view.ch.mode == RADIO_MODE_FM && !sm->hotspot &&
-		  sm->view.state != RS_TX;
+		  sm->view.state != RS_TX && !radio_dstar_running() && !radio_ysf_running();	// one consumer of the receive audio at a time
 	r.rx_hz = sm->view.ch.rx_hz;
 #endif
 #if CONFIG_DMR
@@ -6101,6 +6201,9 @@ static bool dtmf_allowed(const radio_sm_t *sm)
 	if (board.radio->tx_dtmf == NULL || sm->view.state != RS_TX || sm->view.ch.mode != RADIO_MODE_FM || !sm->ptt ||
 			sm->hotspot || sm->host_audio) {
 		return false;
+	}
+	if (radio_dstar_running() || radio_ysf_running()) {
+		return false;	// an FM channel underneath, but a tone would land on top of the digital signal
 	}
 #if CONFIG_FM_TX_TONES
 	if (sm->roger_ms != 0 || sm->view.tone_burst || sm->burst_keyed) {
@@ -6586,6 +6689,15 @@ static uint8_t air_heard(const radio_sm_t *sm)
 		pending = (v->flags & RADIO_NXDN_ENC) == 0 && v->src == 0;	// no VCALL yet: nothing decided
 	} else
 #endif
+#if CONFIG_YSF
+	if (CONFIG_YSF && sm->view.ch.mode == RADIO_MODE_YSF) {
+		// Fusion's own receiver state: the squelch opens on a good FICH and its own call checks decide the rest
+		const radio_ysf_view_t *v = &sm->view.ysf;
+		rx = v->rx != RYSF_RX_IDLE;
+		played = v->playing;
+		pending = rx && !played && v->muted == 0;	// heard, nothing decided against it yet
+	} else
+#endif
 	{
 #if CONFIG_P25
 		const radio_p25_view_t *v = &sm->view.p25;
@@ -6599,9 +6711,14 @@ static uint8_t air_heard(const radio_sm_t *sm)
 }
 #endif
 
-// On an air mode's channel, the board in its digital mode and tuned: the engine starts (dmr_end stopped any before)
+// On a P25 or NXDN channel, the board in its digital mode and tuned: the engine starts (dmr_end stopped any before).
+// Fusion reaches the board's DMR mode the same way but runs its own engine (radio_ysf.c), so it must not come here:
+// a P25 engine started for it would keep air_running true and lock the poll's Fusion branch out
 static void air_begin(radio_sm_t *sm)
 {
+	if (!air_session_mode(sm->view.ch.mode)) {
+		return;
+	}
 #if CONFIG_NXDN
 	if (sm->view.ch.mode == RADIO_MODE_NXDN) {
 		radio_nxdn_begin(&sm->view.ch, air_number(sm));
@@ -6865,11 +6982,208 @@ static void air_poll_tx(radio_sm_t *sm, uint32_t now_ms)
 }
 #endif
 
+#if CONFIG_DSTAR
+// --- D-STAR (radio_dstar.h): the core keys and times out, the module fills the transmission and the squelch ---
+
+static void dstar_ptt_down(radio_sm_t *sm, uint32_t now_ms)
+{
+	uint8_t why = radio_dstar_tx_check();
+	if (why != TXDENY_NONE) {
+		deny(sm, why);
+		return;
+	}
+	sm->view.state = RS_TX;		// speaker off, red LED on, before keying
+	sm->view.tx_auto = false;
+	sm->view.last_tx_ms = now_ms != 0 ? now_ms : 1;
+	sm->view.tx_deny = TXDENY_NONE;
+	sm->view.tx_elapsed_ms = 0;
+	sm->tx_start_ms = now_ms;
+	outputs(sm);
+	const channel_t *ch = &sm->view.ch;
+	if (!key_tx(sm, ch->tx_hz, (radio_bw_t)ch->bw, sm->view.power, &ch->tx_tone)) {
+		deny(sm, board_refusal());
+		return;
+	}
+	if (!radio_dstar_tx_start(now_ms)) {
+		board.radio->tx_off();
+		radio_dstar_rx_again(now_ms);
+		deny(sm, TXDENY_REFUSED);
+		return;
+	}
+	radio_dstar_view(&sm->view.dstar);
+	changed(sm);
+}
+
+// Every poll on a D-STAR channel: the engine fed, the over followed to its end, the receive state from the deframer
+// (a header or a late entry opens it, the end pattern or a lost carrier closes it) in place of the noise squelch
+static void dstar_service(radio_sm_t *sm, uint32_t now_ms)
+{
+	if (radio_dstar_poll(now_ms)) {
+		radio_dstar_view(&sm->view.dstar);
+		changed(sm);
+	}
+	if (sm->view.state == RS_TX) {
+		tx_timer(sm, now_ms);
+		if (sm->view.tot_s != 0 && sm->view.tx_elapsed_ms >= (uint32_t)sm->view.tot_s * 1000) {
+			radio_dstar_tx_abort();
+			board.radio->tx_off();
+			radio_dstar_rx_again(now_ms);
+			deny(sm, TXDENY_TIMEOUT);	// until PTT is released
+			return;
+		}
+		if (!sm->ptt && radio_dstar_tx_done(now_ms)) {
+			fm_tx_end(sm, false, now_ms);	// unkeys
+			radio_dstar_rx_again(now_ms);
+		}
+		return;
+	}
+	if (sm->view.state == RS_TX_DENIED) {
+		return;
+	}
+	bool rx = radio_dstar_receiving();
+	if (sm->view.state == RS_IDLE && rx) {
+		sm->view.state = RS_RX;
+		activity(sm, now_ms);
+		changed(sm);
+	} else if (sm->view.state == RS_RX) {
+		if (rx) {
+			activity(sm, now_ms);
+		} else {
+			end_reception(sm, now_ms);
+			changed(sm);
+		}
+	}
+}
+#endif
+
+#if CONFIG_DSTAR || CONFIG_YSF
+// PTT pressed again while the last D-STAR or Fusion over still sends its queued voice and end after the release: the
+// state is RS_TX until the module says it is done. That over is cut here, unkeyed and back to receive, before anything
+// looks at the press. A refusal would otherwise set RS_TX_DENIED over a keyed transmitter, which nothing unkeyed (the
+// services stop following an over in a denial, and the release's tx_off is for RS_TX only), leaving it on air with
+// the state idle and no time-out; and a fresh over would start the engine again under the interrupt still pulling the
+// old one. The far end loses this over's end pattern, as at a fade, and the next header follows at once
+static void dv_drain_cut(radio_sm_t *sm, uint32_t now_ms)
+{
+	if (sm->view.state != RS_TX) {
+		return;
+	}
+#if CONFIG_DSTAR
+	if (radio_dstar_running()) {
+		radio_dstar_tx_abort();		// the pull stopped before the board unkeys
+		fm_tx_end(sm, false, now_ms);
+		radio_dstar_rx_again(now_ms);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (radio_ysf_running()) {
+		radio_ysf_tx_abort();
+		fm_tx_end(sm, false, now_ms);
+		radio_ysf_rx_again(now_ms);
+	}
+#endif
+}
+#else
+static inline void dv_drain_cut(radio_sm_t *sm, uint32_t now_ms) { (void)sm; (void)now_ms; }
+#endif
+
+#if CONFIG_YSF
+// --- Fusion (radio_ysf.h): the core keys and times out, the module fills the transmission and the squelch ---
+
+static void ysf_ptt_down(radio_sm_t *sm, uint32_t now_ms)
+{
+	uint8_t why = radio_ysf_tx_check();
+	if (why != TXDENY_NONE) {
+		deny(sm, why);
+		return;
+	}
+	sm->view.state = RS_TX;		// speaker off, red LED on, before keying
+	sm->view.tx_auto = false;
+	sm->view.last_tx_ms = now_ms != 0 ? now_ms : 1;
+	sm->view.tx_deny = TXDENY_NONE;
+	sm->view.tx_elapsed_ms = 0;
+	sm->tx_start_ms = now_ms;
+	outputs(sm);
+	// The module first: on the chip's air route it queues the transmission's first blocks, and the provider sends
+	// nothing until the queue has them. key_tx then keys the PA, so the queue is never behind the carrier
+	if (!radio_ysf_tx_start(now_ms)) {
+		radio_ysf_rx_again(now_ms);
+		deny(sm, TXDENY_REFUSED);
+		return;
+	}
+	const channel_t *ch = &sm->view.ch;
+	// The 25 kHz setting whatever the record says (ysf-modem.md 1.3): C4FM's outer symbols are 2.7 kHz and its peaks
+	// near 4 kHz, past what a 12.5 kHz transmit limiter passes. load_channel sets it and the codeplug's own flag is
+	// ignored on this kind, but a path that reloaded the record (a zone edit, a settings write) would put 12.5 back
+	if (!key_tx(sm, ch->tx_hz, RADIO_BW_25K, sm->view.power, &ch->tx_tone)) {
+		radio_ysf_tx_abort();
+		deny(sm, board_refusal());
+		return;
+	}
+#if CONFIG_YSF_AIR
+	// The chip's route: the blocks are queued, the radio is keyed, and the provider sends them now. A provider that
+	// cannot begin (the chip's physical layer refused) must not leave the carrier up with nothing on it
+	if (radio_ysf_tx_air() && (board.air == NULL || !board.air->tx_begin())) {
+		radio_ysf_tx_abort();
+		board.radio->tx_off();
+		sm->view.state = RS_IDLE;
+		deny(sm, TXDENY_REFUSED);
+		return;
+	}
+#endif
+	radio_ysf_view(&sm->view.ysf);
+	changed(sm);
+}
+
+// Every poll on a Fusion channel: the engine fed, the transmission followed to its end, the receive state from the
+// receiver (a good FICH opens it, the terminator or four missed syncs close it) in place of the noise squelch
+static void ysf_service(radio_sm_t *sm, uint32_t now_ms)
+{
+	if (radio_ysf_poll(now_ms)) {
+		radio_ysf_view(&sm->view.ysf);
+		changed(sm);
+	}
+	if (sm->view.state == RS_TX) {
+		tx_timer(sm, now_ms);
+		if (sm->view.tot_s != 0 && sm->view.tx_elapsed_ms >= (uint32_t)sm->view.tot_s * 1000) {
+			radio_ysf_tx_abort();
+			board.radio->tx_off();
+			radio_ysf_rx_again(now_ms);
+			deny(sm, TXDENY_TIMEOUT);	// until PTT is released
+			return;
+		}
+		if (!sm->ptt && radio_ysf_tx_done(now_ms)) {
+			fm_tx_end(sm, false, now_ms);	// unkeys
+			radio_ysf_rx_again(now_ms);
+		}
+		return;
+	}
+	if (sm->view.state == RS_TX_DENIED) {
+		return;
+	}
+	bool rx = radio_ysf_receiving();
+	if (sm->view.state == RS_IDLE && rx) {
+		sm->view.state = RS_RX;
+		activity(sm, now_ms);
+		changed(sm);
+	} else if (sm->view.state == RS_RX) {
+		if (rx) {
+			activity(sm, now_ms);
+		} else {
+			end_reception(sm, now_ms);
+			changed(sm);
+		}
+	}
+}
+#endif
+
 static void ptt_down(radio_sm_t *sm, uint32_t now_ms)
 {
 	if (sm->ptt) {
 		return;
 	}
+	dv_drain_cut(sm, now_ms);
 #if CONFIG_DMR_TRUNK
 	if (sm->t3_fb == 2) {
 		t3_to_fallback(sm, now_ms);	// looking for the TSCC from the fallback channel: PTT talks on the fallback
@@ -6954,7 +7268,7 @@ static void ptt_down(radio_sm_t *sm, uint32_t now_ms)
 	}
 #endif
 #if CONFIG_AIR
-	if (air_mode(sm->view.ch.mode)) {
+	if (air_session_mode(sm->view.ch.mode)) {
 #if CONFIG_P25_TRUNK
 		if (radio_p25_trunked()) {
 			p25t_ptt(sm);		// the grant keys it (p25t_tick)
@@ -6964,6 +7278,29 @@ static void ptt_down(radio_sm_t *sm, uint32_t now_ms)
 		if (!sm->air_tx) {
 			air_key(sm, now_ms, sm->view.ch.tx_hz);
 		}		// else the last transmission is still ending: air_tick keys again once it is done
+		return;
+	}
+#endif
+#if CONFIG_DSTAR
+	if (radio_dstar_running()) {
+		dstar_ptt_down(sm, now_ms);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (radio_ysf_running()) {
+		// A VOX or tone-burst transmission latched on an FM channel has nothing to do with a Fusion one: its key is
+		// held for that channel's audio, and leaving the latch set would make this PTT the one that clears it instead
+		// of keying (the first press did nothing and the second worked, then the next was lost again). Each latch is
+		// under its own switch: a build without VOX or the tones has no such latch to clear
+#if CONFIG_VOX
+		sm->vox_keyed = false;
+		sm->view.vox_keyed = false;
+#endif
+#if CONFIG_FM_TX_TONES
+		sm->burst_keyed = false;
+#endif
+		ysf_ptt_down(sm, now_ms);
 		return;
 	}
 #endif
@@ -7080,6 +7417,20 @@ static void ptt_release(radio_sm_t *sm, bool roger, uint32_t now_ms)
 	bool keyed = sm->dmr_keyed;	// the DMR keying stays armed until the stack lets go (dmr_follow)
 #else
 	bool keyed = false;
+#endif
+#if CONFIG_DSTAR
+	if (radio_dstar_running() && sm->view.state == RS_TX) {
+		radio_dstar_tx_release();	// the voice still queued, then the end pattern: dstar_service unkeys
+		changed(sm);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (radio_ysf_running() && sm->view.state == RS_TX) {
+		radio_ysf_tx_release();	// the frame being sent, then the terminator: ysf_service unkeys
+		changed(sm);
+		return;
+	}
 #endif
 	dtmf_cancel(sm, now_ms);	// before the roger beep: the board never mixes the two
 #if CONFIG_FM_TX_TONES
@@ -7396,6 +7747,14 @@ static void hotspot_enter(radio_sm_t *sm, uint32_t rx_hz, uint32_t now_ms)
 #if CONFIG_BCAST_FM
 	bcast_power(sm, false);
 	sm->view.bcast = sm->view.bcast_fault = false;
+#endif
+#if CONFIG_DSTAR
+	radio_dstar_stop();	// the host drives the modem now; leaving the hotspot tunes the channel again
+	sm->view.dstar.on = false;
+#endif
+#if CONFIG_YSF
+	radio_ysf_stop();	// the host drives the modem now; leaving the hotspot tunes the channel again
+	sm->view.ysf.on = false;
 #endif
 	if (sm->board_mode == RADIO_MODE_DMR) {
 		dmr_end(sm);	// the modem is free for the hotspot
@@ -8299,6 +8658,9 @@ void radio_sm_init(radio_sm_t *sm, uint32_t now_ms)
 	batt_init(&sm->batt);
 #if CONFIG_BEEP
 	beep_init(pcm_audio());
+#if CONFIG_YSF
+	radio_ysf_init(pcm_audio());
+#endif
 #endif
 	step_update(sm);
 	sm->view.source = codeplug_source();
@@ -8347,6 +8709,9 @@ void radio_sm_init(radio_sm_t *sm, uint32_t now_ms)
 #endif
 #endif
 
+#if CONFIG_DSTAR
+	radio_dstar_init(pcm_audio());
+#endif
 	kv_load(sm, now_ms);
 
 	// The saved zone and channel; else zone 0 and its first channel; if zone 0 has none, the first zone that has one
@@ -8383,7 +8748,10 @@ static void tone_burst(radio_sm_t *sm, bool on, uint32_t max_ms, uint32_t now_ms
 		}
 		sm->burst_timed = sm->burst_held = sm->burst_key_owned = false;
 		sm->burst_ms = sm->burst_end_ms = 0;
-		if (sm->view.ch.mode != RADIO_MODE_FM || sm->hotspot || board.radio->tx_tone == NULL) {
+		// D-STAR and Fusion channels are FM underneath (view.ch.mode), but a 1750 Hz burst over their data would only
+		// break it: refused as on DMR
+		if (sm->view.ch.mode != RADIO_MODE_FM || sm->hotspot || board.radio->tx_tone == NULL || radio_dstar_running() ||
+				radio_ysf_running()) {
 			beep(sm, BEEP_ERROR);
 			return;
 		}
@@ -8853,7 +9221,9 @@ static void vfo_sfr_request(radio_sm_t *sm, const radio_req_t *req, bool busy, u
 // A temporary mode change is allowed (a channel of a kind keeps the kind's mode, channel-modes.md 6)
 static bool mode_allowed(const radio_sm_t *sm, int32_t mode)
 {
-	if (sm->view.ch.kind != CODEPLUG_KIND_NONE || mode == sm->view.ch.mode) {
+	// The mode may be changed on a channel as well as in the VFO: a temporary change, not saved to the codeplug
+	// (mode_request sets or drops the kind the new mode needs). Only the same mode again is refused
+	if (mode == sm->view.ch.mode) {
 		return false;
 	}
 	switch (mode) {
@@ -8865,6 +9235,10 @@ static bool mode_allowed(const radio_sm_t *sm, int32_t mode)
 		return p25_ok() && !radio_listen_band(sm->view.ch.rx_hz);
 	case RADIO_MODE_NXDN:
 		return nxdn_ok() && !radio_listen_band(sm->view.ch.rx_hz);
+#if CONFIG_YSF
+	case RADIO_MODE_YSF:
+		return radio_ysf_fits() && !radio_listen_band(sm->view.ch.rx_hz);
+#endif
 	default:
 		return false;
 	}
@@ -8876,11 +9250,29 @@ static void mode_request(radio_sm_t *sm, const radio_req_t *req, bool busy, uint
 		return;
 	}
 	sm->view.ch.mode = (uint8_t)req->arg;
+	// The mode alone does not make a P25, NXDN or Fusion channel: its kind does (radio_p25_kind, radio_nxdn_kind,
+	// radio_ysf_kind), and the module's start reads that. Choosing one of them sets the kind here, and choosing any
+	// other mode drops it again. FM, DMR and the trunked kinds have no tag of their own
+	switch (sm->view.ch.mode) {
+	case RADIO_MODE_P25:
+		sm->view.ch.kind = CODEPLUG_KIND_P25;
+		break;
+	case RADIO_MODE_NXDN:
+		sm->view.ch.kind = CODEPLUG_KIND_NXDN;
+		break;
+	case RADIO_MODE_YSF:
+		sm->view.ch.kind = CODEPLUG_KIND_YSF;
+		break;
+	default:
+		sm->view.ch.kind = 0;
+		break;
+	}
 	if (sm->view.ch.mode == RADIO_MODE_DMR && sm->view.ch.timeslot != 2) {
 		sm->view.ch.timeslot = 1;
 	}
 	if (sm->view.vfo) {
-		sm->vfo_ch.mode = sm->view.ch.mode;	// the VFO's own mode, not a temporary change
+		sm->vfo_ch.mode = sm->view.ch.mode;
+		sm->vfo_ch.kind = sm->view.ch.kind;
 		sm->vfo_ch.timeslot = sm->view.ch.timeslot;
 	}
 	set_temporary(sm);
@@ -9175,6 +9567,31 @@ void radio_sm_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 		break;
 #endif
 	case RREQ_POWER_OFF: power_off_request(sm, req, now_ms); break;
+#if CONFIG_DSTAR
+	case RREQ_DSTAR_UR:
+		if (radio_dstar_running()) {
+			uint32_t a = (uint32_t)req->arg, b = req->arg2;
+			char ref[8] = { (char)(a >> 8), (char)(a >> 16), (char)(a >> 24), (char)b, (char)(b >> 8),
+					(char)(b >> 16), (char)(b >> 24), 0 };
+			radio_dstar_ur((uint8_t)a, ref);
+			radio_dstar_poll(now_ms);
+			radio_dstar_view(&sm->view.dstar);
+			changed(sm);
+		}
+		break;
+	case RREQ_DSTAR_RELOAD:
+		radio_dstar_cal_reload();
+		if (radio_dstar_running() && !busy && !sm->ptt) {
+			tune(sm, now_ms);	// the station and the calibration taken again
+		}
+#if CONFIG_YSF
+		// The calibration is the flat paths', so a Fusion channel takes it too (radio_flat.h); its start reads it
+		if (radio_ysf_running() && !busy && !sm->ptt) {
+			tune(sm, now_ms);
+		}
+#endif
+		break;
+#endif
 	case RREQ_RELOAD: reload_request(sm, busy, now_ms); break;
 #if CONFIG_SCAN
 	case RREQ_SCAN: scan_request(sm, req, now_ms); break;
@@ -9757,13 +10174,27 @@ void radio_sm_poll(radio_sm_t *sm, uint32_t now_ms)
 #endif
 #endif
 #if CONFIG_AIR
-	if (air_running() || air_mode(sm->view.ch.mode)) {
+	if (air_running() || air_session_mode(sm->view.ch.mode)) {
 		air_poll_tx(sm, now_ms);
 		outputs(sm);
 		return;		// the state follows the engine (air_tick)
 	}
 #endif
 
+#if CONFIG_DSTAR
+	if (radio_dstar_running()) {
+		dstar_service(sm, now_ms);
+		outputs(sm);
+		return;
+	}
+#endif
+#if CONFIG_YSF
+	if (radio_ysf_running()) {
+		ysf_service(sm, now_ms);
+		outputs(sm);
+		return;
+	}
+#endif
 	if (sm->view.state == RS_TX) {
 #if CONFIG_SATELLITE_TLE && CONFIG_FM_TX_TONES
 		if (sm->satellite_arm_active && (int32_t)(now_ms - sm->satellite_arm_end_ms) >= 0) {

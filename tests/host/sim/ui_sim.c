@@ -6,7 +6,7 @@
 //
 // Script tokens (separated by spaces):
 //   up down left right ok back quick ctx 0..9 tt mon user1..user4 emerg enc+ enc-   a short press (counted);
-//   powerkey zone+ zone- scankey skipkey lockkey cbkey homekey dualkey abkey: what a reassigned side key sends
+//   powerkey zone+ zone- scankey skipkey monkey lockkey cbkey homekey dualkey abkey: what a reassigned side key sends
 //   long:<key>          a long press (counted)
 //   ptt / ptt:<ms>      PTT pressed for 1 s / ms (counted); pttdown ... pttup holds it
 //   mondown ... monup   the monitor key held (FM: the squelch held open)
@@ -30,9 +30,13 @@
 //   p25rx:<src>,<dst>[,u|e|o]   a P25 call (CONFIG_P25 builds): u a unit call, e encrypted, o another talk group
 //                       (both not played); p25rxend ends it
 //   nxdnrx:<src>,<dst>[,e|p]    an NXDN call: e scrambled and muted, p scrambled and played
-//   chkind:<n>,p25|nxdn[,<name>]  a stored P25 or NXDN channel, with an optional name (_ = space)
+//   chkind:<n>,p25|nxdn|dstar|ysf[,<name>]  a stored channel of that kind, with an optional name (_ = space)
 //   p25t:<state>[,<tg>] the channel on view is a trunked P25 one (CONFIG_P25_TRUNK builds), its follower in state
 //                       1 finding the system, 2 on the control channel, 3 following talk group tg
+//   ysf                 the channel is a Fusion one (kind 6, DG-ID sent 0), our callsign G4XYZ; ysfnocall: none set
+//   ysfrx:<src>[,dn|vw|vd1[,<dgid>[,<radio id>]]]   a Fusion transmission is heard (DN unless said), from DG-ID 0
+//                       unless given; src - : joined late, no callsigns heard (and no destination), only the radio ID
+//                       if given; ysfrxend ends it. ysfvw: the channel sends VW (after ysf)
 //   rx:<src>,<dst>,g|p[,name]   a DMR call starts (g = group, p = private to us); rxend ends it
 //   call:<src>,<dst>,g|p        a 2 s call, then 1 s of quiet
 //   msg:<src>,<text>    a text message arrives (_ = space); alert:<src>; emergency:<src>; privcall:<src>
@@ -67,6 +71,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "codeplug/codeplug_modes.h"
 #include "ui_sim.h"
 #if CONFIG_SATELLITE_TLE
 #include "satellite/store.h"
@@ -1429,6 +1434,9 @@ static void load_channel(void)
 	view.dmr.ts = view.ch.timeslot;
 	view.dmr.reply_active = false;
 	reply_until = 0;
+#if CONFIG_DSTAR
+	memset(&view.dstar, 0, sizeof view.dstar);	// a channel change leaves D-STAR ("dstar" makes one)
+#endif
 	default_target();
 	changed();
 }
@@ -1609,6 +1617,12 @@ void radio_req_clear_temporary(void)
 	if (view.vfo)
 		return;
 	view.ch = ch_saved;
+#if CONFIG_DSTAR
+	if (view.dstar.on) {
+		view.ch.mode = RADIO_MODE_FM;	// still the D-STAR channel "dstar" made
+		view.ch.kind = CODEPLUG_KIND_DSTAR;
+	}
+#endif
 	view.power = board.power_default;
 	view.squelch = 5;
 	view.temp = 0;
@@ -1652,6 +1666,14 @@ static void ptt(bool down)
 			changed();
 			return;
 		}
+#if CONFIG_DSTAR
+		if (view.dstar.on && view.dstar.no_call) {
+			view.state = RS_TX_DENIED;
+			view.tx_deny = TXDENY_NO_CALL;
+			changed();
+			return;
+		}
+#endif
 		view.state = RS_TX;
 		view.tx_elapsed_ms = 0;
 		if (view.scan != 3)
@@ -1678,10 +1700,142 @@ static void ptt(bool down)
 		view.state = RS_IDLE;
 		view.dmr.state = RDMR_IDLE;
 		view.dtmf_digits[0] = 0;
+#if CONFIG_DSTAR
+		if (view.dstar.on && view.dstar.ur_mode >= RDSTAR_UR_LINK)
+			radio_req_dstar_ur(RDSTAR_UR_CHANNEL, NULL);	// a reflector command goes out once
+#endif
 	}
 	changed();
 }
 void radio_req_ptt(bool down) { ptt(down); }
+
+#if CONFIG_DSTAR
+// D-STAR (radio_dstar.h): a channel made D-STAR by the "dstar" token, the station typed on the radio, UR's choices as
+// the radio core keeps them (for now, one over), and an over heard ("dstarrx")
+static char dstar_station[3][24];
+
+static void dstar_routing(void)
+{
+	radio_dstar_view_t *d = &view.dstar;
+	const char *my = dstar_station[0][0] != '\0' ? dstar_station[0] : "Q1ABC";
+	snprintf(d->tx_my, sizeof d->tx_my, "%.8s", worst ? "Q1WWWW/P" : my);
+	snprintf(d->tx_suffix, sizeof d->tx_suffix, "%.4s", dstar_station[1][0] != '\0' ? dstar_station[1] : "");
+	d->no_call = d->tx_my[0] == '\0';
+}
+
+static void sim_dstar_on(const char *arg)
+{
+	radio_dstar_view_t *d = &view.dstar;
+	memset(d, 0, sizeof *d);
+	d->on = true;
+	view.ch.mode = RADIO_MODE_FM;	// as radio_sm.c's set_channel: FM to the rest of the core
+	view.ch.bw = RADIO_BW_12K5;
+	view.ch.rx_tone = view.ch.tx_tone = (subtone_t){ TONE_NONE, 0 };
+	view.ch.kind = CODEPLUG_KIND_DSTAR;
+	view.dmr.active = false;
+	strcpy(d->tx_ur, "CQCQCQ");
+	if (arg != NULL && strcmp(arg, "rpt") == 0) {
+		d->tx_repeater = true;
+		strcpy(d->tx_rpt1, "Q1RPT  B");
+		strcpy(d->tx_rpt2, "Q1RPT  G");
+	} else {
+		strcpy(d->tx_rpt1, "DIRECT");
+		strcpy(d->tx_rpt2, "DIRECT");
+	}
+	dstar_routing();
+	if (arg != NULL && strcmp(arg, "nocall") == 0) {
+		d->tx_my[0] = '\0';
+		d->no_call = true;
+	}
+	if (arg != NULL && strcmp(arg, "noram") == 0)
+		d->voice_off = RDSTAR_VOICE_NO_RAM;
+	changed();
+}
+
+void radio_req_dstar_ur(uint8_t mode, const char *ref)
+{
+	radio_dstar_view_t *d = &view.dstar;
+	if (!d->on)
+		return;
+	d->ur_mode = mode;
+	switch (mode) {
+	case RDSTAR_UR_REPLY: snprintf(d->tx_ur, sizeof d->tx_ur, "%s", d->my); break;
+	case RDSTAR_UR_LINK: {
+		char r[8] = "       ";
+		size_t n = strlen(ref != NULL ? ref : "");
+		if (n >= 2 && n <= 7) {
+			memcpy(r, ref, n - 1u);
+			r[6] = ref[n - 1u];
+		}
+		snprintf(d->tx_ur, sizeof d->tx_ur, "%.7sL", r);
+		break;
+	}
+	case RDSTAR_UR_UNLINK: strcpy(d->tx_ur, "       U"); break;
+	case RDSTAR_UR_ECHO: strcpy(d->tx_ur, "       E"); break;
+	case RDSTAR_UR_INFO: strcpy(d->tx_ur, "       I"); break;
+	default: strcpy(d->tx_ur, "CQCQCQ"); break;
+	}
+	changed();
+}
+
+void radio_req_dstar_reload(void)
+{
+	dstar_routing();
+	changed();
+}
+
+bool ui_svc_dstar_station(uint8_t field, char *out, uint8_t cap)
+{
+	if (field > 2)
+		return false;
+	snprintf(out, cap, "%s", dstar_station[field]);
+	return true;
+}
+
+bool ui_svc_dstar_station_set(uint8_t field, const char *text)
+{
+	if (field > 2)
+		return false;
+	snprintf(dstar_station[field], sizeof dstar_station[field], "%s", text);
+	radio_req_dstar_reload();
+	return true;
+}
+
+void ui_svc_dstar_ur(uint8_t mode, const char *ref) { radio_req_dstar_ur(mode, ref); }
+
+// "dstarrx:CALL,SUFFIX,UR,MESSAGE" (underscores are spaces): an over heard, playing until dstarend
+static void sim_dstar_rx(char *arg)
+{
+	radio_dstar_view_t *d = &view.dstar;
+	char *f[4] = { arg, NULL, NULL, NULL };
+	for (int i = 1; i < 4 && f[i - 1] != NULL; i++) {
+		char *c = strchr(f[i - 1], ',');
+		if (c != NULL) {
+			*c = 0;
+			f[i] = c + 1;
+		}
+	}
+	for (int i = 0; i < 4; i++) {
+		for (char *p = f[i]; p != NULL && *p != 0; p++) {
+			if (*p == '_')
+				*p = ' ';
+		}
+	}
+	snprintf(d->my, sizeof d->my, "%s", f[0] != NULL ? f[0] : "");
+	snprintf(d->suffix, sizeof d->suffix, "%s", f[1] != NULL ? f[1] : "");
+	snprintf(d->ur, sizeof d->ur, "%s", f[2] != NULL ? f[2] : "CQCQCQ");
+	snprintf(d->msg, sizeof d->msg, "%s", f[3] != NULL ? f[3] : "");
+	strcpy(d->rpt1, d->tx_repeater ? d->tx_rpt1 : "DIRECT");
+	strcpy(d->rpt2, d->tx_repeater ? d->tx_rpt2 : "DIRECT");
+	d->heard = true;
+	d->rx = RDSTAR_RX_HEADER;
+	d->playing = true;
+	d->heard_ms = now_ms != 0 ? now_ms : 1;
+	view.state = RS_RX;
+	view.rssi_dbm = -83;
+	changed();
+}
+#endif
 
 static void rx_start(uint32_t src, uint32_t dst, bool group, const char *alias)
 {
@@ -1741,9 +1895,14 @@ static uint16_t n_inbox;
 static bool soft_volume;
 // The broadcast receiver (Settings > Talk & listen > FM broadcast step) only with the "bcast" token, the same way
 static bool bcast_rx;
-// P25 on this radio (UI_FEAT_P25: the VFO's mode tile offers it) only with the "p25" token; NXDN with "nxdn"
+// P25 on this radio (UI_FEAT_P25: the VFO's mode tile offers it) only with the "p25" token; NXDN with "nxdn";
+// C4FM with "c4fm" (the "ysf" token fakes a call instead, so the two do not share a name)
 static bool p25_radio;
 static bool nxdn_radio;
+#if CONFIG_YSF
+static bool ysf_radio;
+bool radio_ysf_fits(void) { return ysf_radio; }
+#endif
 // Hardware options (Settings > Advanced > Hardware, hal_hwopt.h) only with the "hwopt" token: a revision that starts
 // unset and a plain option
 static int8_t hwopt_val[2];
@@ -1768,17 +1927,23 @@ uint32_t ui_svc_features(void)
 	return 0xFFFFFFFFu & ~(soft_volume ? 0 : UI_FEAT_VOLUME) & ~(bcast_rx ? 0 : UI_FEAT_BCAST) &
 	       ~(ref_trim ? 0 : UI_FEAT_REF_TRIM) &
 	       ~(knob_radio ? 0 : UI_FEAT_VOLUME_KNOB) & ~(p25_radio ? 0 : UI_FEAT_P25) &
-	       ~(nxdn_radio ? 0 : UI_FEAT_NXDN);
+	       ~(nxdn_radio ? 0 : UI_FEAT_NXDN) &
+#if CONFIG_YSF
+	       ~(ysf_radio ? 0 : UI_FEAT_YSF)
+#else
+	       0xFFFFFFFFu
+#endif
+	       ;
 }
 // My radio's names (ui_svc_name_*): placeholders, as the user's own would be; a save writes at once
-static char sim_names[UI_NAME_COUNT][17];
+static char sim_names[UI_NAME_COUNT][CODEPLUG_NAME_LEN + 1];
 static void sim_names_reset(void)
 {
 	strcpy(sim_names[UI_NAME_RADIO], "Q0TEST");
 	strcpy(sim_names[UI_NAME_BOOT1], "Q0TEST");
 	strcpy(sim_names[UI_NAME_BOOT2], "Jamie Thompson");
 }
-void ui_svc_name_get(uint8_t which, char out[17])
+void ui_svc_name_get(uint8_t which, char out[CODEPLUG_NAME_LEN + 1])
 {
 	strcpy(out, which < UI_NAME_COUNT ? sim_names[which] : "");
 }
@@ -1786,12 +1951,12 @@ bool ui_svc_name_set(uint8_t which, const char *text)
 {
 	if (which >= UI_NAME_COUNT)
 		return false;
-	strncpy(sim_names[which], text, 16);
-	sim_names[which][16] = '\0';
+	strncpy(sim_names[which], text, CODEPLUG_NAME_LEN);
+	sim_names[which][CODEPLUG_NAME_LEN] = '\0';
 	sim_rec.codeplug_writes++;
 	return true;
 }
-void ui_svc_boot_text(char line1[17], char line2[17])
+void ui_svc_boot_text(char line1[CODEPLUG_NAME_LEN + 1], char line2[CODEPLUG_NAME_LEN + 1])
 {
 	strcpy(line1, sim_names[UI_NAME_BOOT1]);
 	strcpy(line2, sim_names[UI_NAME_BOOT2]);
@@ -1931,6 +2096,18 @@ bool ui_svc_dmr_timeslot(uint8_t ts)
 	}
 	return true;
 }
+#if CONFIG_YSF
+// Fusion's DG-ID sent, as the radio core would take it: the view and the settings the next start reads
+bool ui_svc_ysf_dgid(uint8_t dgid)
+{
+	if (dgid > 99) {
+		return false;
+	}
+	view.ysf.tx_dgid = dgid;
+	changed();
+	return true;
+}
+#endif
 bool ui_svc_dmr_color_code(uint8_t cc)
 {
 	retune();
@@ -2635,6 +2812,12 @@ void sim_reset(const sim_geom_t *g, sim_map_t map)
 {
 	emergency_on = false;
 	sim_foreign = sim_held = false;
+	// A token lasts one case: the mode tile's tiles are per radio, and a case that asked for C4FM must not leave it
+	// on for the next one (which expects a plain FM radio)
+	p25_radio = nxdn_radio = false;
+#if CONFIG_YSF
+	ysf_radio = false;
+#endif
 	disp.width = g->w;
 	disp.height = g->h;
 	disp.bpp = g->bpp;
@@ -2825,6 +3008,7 @@ static const struct { const char *name; uint8_t action; } keys[] = {
 	{ "vfokey", ACT_VFO_TOGGLE },		// a VFO/MR key in the board's key map, or a side key set to VFO/Channel
 	{ "labelkey", ACT_TALK_LABEL },
 	{ "skipkey", ACT_SCAN_SKIP },
+	{ "monkey", ACT_MONITOR_TOGGLE },
 	{ "volkey", ACT_VOLUME },
 	{ "0", ACT_DIGIT_0 }, { "1", ACT_DIGIT_1 }, { "2", ACT_DIGIT_2 }, { "3", ACT_DIGIT_3 }, { "4", ACT_DIGIT_4 },
 	{ "5", ACT_DIGIT_5 }, { "6", ACT_DIGIT_6 }, { "7", ACT_DIGIT_7 }, { "8", ACT_DIGIT_8 }, { "9", ACT_DIGIT_9 },
@@ -2834,7 +3018,7 @@ static bool on_map(uint8_t action, bool lng)
 {
 	if ((action >= ACT_POWER && action <= ACT_VOLUME) || action == ACT_VFO_TOGGLE || action == ACT_DUAL_WATCH ||
 	    action == ACT_AB || action == ACT_TALK_TARGET || action == ACT_TALK_LABEL ||
-	    action == ACT_SCAN_SKIP)
+	    action == ACT_SCAN_SKIP || action == ACT_MONITOR_TOGGLE)
 		// any side key can be set to send these; the few-key map has none, but a radio with side keys and no QUICK key
 		// is the case the key lock needs on it
 		return board.side_key_count != 0 || cur_map == SIM_MAP_F;
@@ -3136,6 +3320,27 @@ static bool run_token(char *t, char *err, size_t len)
 		advance(1500);
 		return true;
 	}
+#if CONFIG_DSTAR
+	if (strcmp(t, "dstar") == 0) {
+		sim_dstar_on(arg);
+		advance(200);
+		return true;
+	}
+	if (strcmp(t, "dstarrx") == 0 && arg != NULL) {
+		sim_dstar_rx(arg);
+		advance(1500);
+		return true;
+	}
+	if (strcmp(t, "dstarend") == 0) {
+		view.dstar.rx = RDSTAR_RX_IDLE;
+		view.dstar.playing = false;
+		view.dstar.heard_ms = now_ms != 0 ? now_ms : 1;
+		view.state = RS_IDLE;
+		changed();
+		advance(200);
+		return true;
+	}
+#endif
 	if (strcmp(t, "aprstx") == 0 || strcmp(t, "aprsend") == 0) {
 		bool on = strcmp(t, "aprstx") == 0;
 		view.state = on ? RS_TX : RS_IDLE;
@@ -3428,9 +3633,9 @@ static bool run_token(char *t, char *err, size_t len)
 		advance(100);
 		return true;
 	}
-	if (strcmp(t, "dlmode") == 0 && arg != NULL) {	// the debug link sets the mode (DMR_FIELDS): fm, dmr, p25 or nxdn
+	if (strcmp(t, "dlmode") == 0 && arg != NULL) {	// the debug link sets the mode (DMR_FIELDS): fm, dmr, p25, nxdn
 		ui_svc_mode(strcmp(arg, "p25") == 0 ? RADIO_MODE_P25 : strcmp(arg, "nxdn") == 0 ? RADIO_MODE_NXDN :
-			    strcmp(arg, "dmr") == 0 ? RADIO_MODE_DMR : RADIO_MODE_FM);
+			    strcmp(arg, "ysf") == 0 ? RADIO_MODE_YSF : strcmp(arg, "dmr") == 0 ? RADIO_MODE_DMR : RADIO_MODE_FM);
 		advance(100);
 		return true;
 	}
@@ -3462,8 +3667,10 @@ static bool run_token(char *t, char *err, size_t len)
 		sim_rec.codeplug_writes--;	// the codeplug as found, not a write of the UI's
 		return true;
 	}
-#if CONFIG_P25 || CONFIG_NXDN
-	if (strcmp(t, "chkind") == 0) {		// stored channel n is a P25 or NXDN channel: its tag, over a stand-in record
+	// Stored channel n is a P25, NXDN, D-STAR or Fusion channel: what codeplug_channel reads for one, the kind from
+	// its tag over the stand-in record (DMR, no contact; channel-modes.md 2.3) and transmit allowed, as the Codeplug
+	// Editor makes a new D-STAR or Fusion channel. Built in every configuration: the kinds' ids are
+	if (strcmp(t, "chkind") == 0) {
 		unsigned n = 0;
 		char k[8] = "";
 		channel_t c;
@@ -3479,8 +3686,13 @@ static bool run_token(char *t, char *err, size_t len)
 				if (*ch == '_')
 					*ch = ' ';
 		}
-		c.kind = strcmp(k, "nxdn") == 0 ? CODEPLUG_KIND_NXDN : CODEPLUG_KIND_P25;
+		c.kind = strcmp(k, "nxdn") == 0 ? CODEPLUG_KIND_NXDN : strcmp(k, "ysf") == 0 ? CODEPLUG_KIND_YSF :
+			 strcmp(k, "dstar") == 0 ? CODEPLUG_KIND_DSTAR : CODEPLUG_KIND_P25;
 		c.mode = RADIO_MODE_DMR;
+		if (c.kind == CODEPLUG_KIND_YSF || c.kind == CODEPLUG_KIND_DSTAR) {
+			c.contact = 0;
+			c.rx_only = false;
+		}
 		if (sim_write((uint16_t)n, &c) < 0) {
 			snprintf(err, len, "no room for %s", t);
 			return false;
@@ -3488,7 +3700,6 @@ static bool run_token(char *t, char *err, size_t len)
 		sim_rec.codeplug_writes--;	// the codeplug as found, not a write of the UI's
 		return true;
 	}
-#endif
 #if CONFIG_NXDN
 	if (strcmp(t, "nxdnrx") == 0) {
 		unsigned src = 0, dst = 0;
@@ -3548,6 +3759,59 @@ static bool run_token(char *t, char *err, size_t len)
 #endif
 	if (strcmp(t, "p25rxend") == 0) {
 		view.p25.flags &= (uint8_t)~(RADIO_P25_RX | RADIO_P25_PLAYED | RADIO_P25_ENC);
+		view.state = RS_IDLE;
+		view.last_rx_ms = now_ms;
+		changed();
+		advance(200);
+		return true;
+	}
+#endif
+#if CONFIG_YSF
+	if (strcmp(t, "ysf") == 0 || strcmp(t, "ysfnocall") == 0) {
+		view.ch.kind = CODEPLUG_KIND_YSF;
+		view.ch.mode = RADIO_MODE_FM;
+		view.ch.bw = RADIO_BW_25K;
+		view.ch.rx_tone = view.ch.tx_tone = (subtone_t){ TONE_NONE, 0 };
+		memset(&view.ysf, 0, sizeof view.ysf);
+		view.ysf.on = true;
+		view.ysf.codec = true;
+		view.ysf.no_call = t[3] != '\0';
+		strcpy(view.ysf.tx_src, view.ysf.no_call ? "" : "G4XYZ");
+		strcpy(view.ysf.tx_dest, "ALL");
+		changed();
+		advance(200);
+		return true;
+	}
+	if (strcmp(t, "ysfvw") == 0) {	// the channel sends Voice FR
+		view.ysf.tx_vw = true;
+		changed();
+		advance(100);
+		return true;
+	}
+	if (strcmp(t, "ysfrx") == 0 && arg != NULL) {
+		char src[16] = "", mode[8] = "dn", id[8] = "";
+		unsigned dgid = 0;
+		sscanf(arg, "%15[^,],%7[^,],%u,%7s", src, mode, &dgid, id);
+		bool late = strcmp(src, "-") == 0;
+		view.ysf.rx = RYSF_RX_CALL;
+		view.ysf.heard = true;
+		view.ysf.mode = strcmp(mode, "vw") == 0 ? RYSF_MODE_VW : strcmp(mode, "vd1") == 0 ? RYSF_MODE_VD1 : RYSF_MODE_DN;
+		view.ysf.dgid = (uint8_t)dgid;
+		view.ysf.muted = view.ysf.rx_dgid != 0 && dgid != view.ysf.rx_dgid;
+		view.ysf.playing = (view.ysf.mode != RYSF_MODE_VW || CONFIG_YSF_VW) && !view.ysf.muted;
+		strcpy(view.ysf.src, late ? "" : src);
+		strcpy(view.ysf.dest, late ? "" : "ALL");
+		snprintf(view.ysf.src_id, sizeof view.ysf.src_id, "%.5s", id);
+		view.ysf.heard_ms = now_ms;
+		view.state = RS_RX;
+		view.rssi_dbm = -92;
+		changed();
+		advance(400);
+		return true;
+	}
+	if (strcmp(t, "ysfrxend") == 0) {
+		view.ysf.rx = RYSF_RX_IDLE;
+		view.ysf.playing = false;
 		view.state = RS_IDLE;
 		view.last_rx_ms = now_ms;
 		changed();
@@ -3687,7 +3951,7 @@ static bool run_token(char *t, char *err, size_t len)
 			ui_draw_splash(board.name, "a1b2c3d4", tr(STUB_ENTRY_LINE1), tr(STUB_ENTRY_LINE2));
 			return true;
 		}
-		char l1[17], l2[17];
+		char l1[CODEPLUG_NAME_LEN + 1], l2[CODEPLUG_NAME_LEN + 1];
 		ui_svc_boot_text(l1, l2);
 		ui_draw_splash(board.name, "a1b2c3d4", l1, l2);
 		return true;
@@ -3815,6 +4079,12 @@ static bool run_token(char *t, char *err, size_t len)
 		nxdn_radio = true;
 		return true;
 	}
+#if CONFIG_YSF
+	if (strcmp(t, "c4fm") == 0) {		// this radio's mode tile offers C4FM (Fusion)
+		ysf_radio = true;
+		return true;
+	}
+#endif
 	if (strcmp(t, "hwopt") == 0) {		// this radio has hardware options (sim_hwopts)
 		board.hwopts = sim_hwopts;
 		board.hwopt_count = 2;

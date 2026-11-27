@@ -1260,6 +1260,200 @@ def cmd_probe(args):
     return 0
 
 
+def cmd_font(args):
+    """Burn the CJK glyph bitmaps, or the pinyin tables, into the data flash region the board names.
+
+    The image is what tools/cjkfont.py --out-bin (or tools/pinyin_table.py --out-bin) wrote: the bytes in the order the
+    firmware's lookup reads them at CONFIG_CJK_FONT_ADDR (--pinyin: CONFIG_PINYIN_ADDR). The radio must be running
+    RadioFoundry with CONFIG_STUB_ENTRY, as for a serial flash: stub/stubtool.py --write-font does the work (it enters
+    its monitor, writes only the sectors that differ and verifies them by CRC), and this hands it the address from the
+    board's record."""
+    b = pick_board(args.board, "font")
+    what = "pinyin" if args.pinyin else "font"
+    region = b.stub.get(what) if b.stub else None
+    if region is None:
+        raise UsageError("%s has no %s region (board.toml [flash.stub] %s); nothing to write" % (b.name, what, what))
+    lo, hi = region
+    try:
+        size = os.path.getsize(args.image)
+    except OSError as e:
+        raise UsageError(str(e))
+    block = 0x1000
+    if not size or size % block or size > hi - lo:
+        raise UsageError("%s is %d bytes: the %s region at 0x%X holds 0x%X bytes in whole 4 KB sectors (%s --out-bin "
+                         "writes it)" % (args.image, size, what, lo, hi - lo,
+                                         "tools/pinyin_table.py" if args.pinyin else "tools/cjkfont.py"))
+    if args.check and size != hi - lo:
+        # A comparison has to cover the whole row: a shorter file would call a radio identical whose tail is another
+        # build's
+        raise UsageError("%s is %d bytes but the %s region holds %d: --check compares the whole row, so give the file "
+                         "that was burned there" % (args.image, size, what, hi - lo))
+    say("%-8s %s: %d bytes into 0x%06X-0x%06X, %d sectors" % (what, b.name, size, lo, lo + size, size // block))
+    # The file's own record says which index it was built for (tools/cjkfont.py writes it beside the blob). A radio
+    # whose firmware reports a different index would draw the wrong glyph for a character, so check before writing.
+    # A radio that does not answer (off, in its bootloader) is not refused: the stub route asks it again anyway
+    if not args.pinyin:
+        meta = args.image + ".json"
+        if os.path.exists(meta):
+            try:
+                with open(meta, encoding="utf-8") as fm:
+                    want = json.load(fm)
+            except (OSError, ValueError) as e:
+                raise UsageError("%s: %s" % (meta, e))
+            table = None
+            try:
+                if args.port:
+                    table = debuglink.Link(args.port).font_table()
+                else:
+                    p = debuglink.probe(log=None)
+                    table = None if p is None else debuglink.Link(p["port"]).font_table()
+            except Exception:
+                table = None		# no radio, or one that does not report its table: nothing to compare
+            if table and table.get("glyphs") != want.get("glyphs"):
+                raise UsageError(
+                    "the radio's firmware was built for %s characters and %s for %s: they come from one run of "
+                    "tools/cjkfont.py, so flash the firmware that matches this font"
+                    % (table.get("glyphs"), args.image, want.get("glyphs")))
+            if table and table.get("in_flash") and table.get("index_hash") != int(want["index_hash"], 0):
+                raise UsageError(
+                    "the radio's index hash is 0x%08X and %s was built with %s: flash the firmware that matches it"
+                    % (table["index_hash"], args.image, want["index_hash"]))
+    # stub/stubtool.py is not on the import path of an installed rfoundry: serialflash.tool() finds it in a checkout
+    # or, in the single-file executable, in the copy bundled there
+    stubtool = serialflash.tool("stubtool")
+    # The row's address is the board's and the stub tools take it from the same record, so no range is passed here: one
+    # number in two places is one that can disagree
+    argv = ["--board", b.id]
+    if args.check:
+        # Read the row back and compare, writing nothing: is this file the one the radio has?
+        argv += ["--check-font", what, "--write-font", args.image]
+    else:
+        argv += ["--font-row", what, "--write-font", args.image]
+    if args.port:
+        argv.insert(0, args.port)
+    if args.dry_run:
+        say("dry run  would run: stubtool.py %s" % " ".join(argv))
+        return 0
+    return stubtool.main(argv)
+
+
+def cmd_prepare(args):
+    """A Chinese build in one go: the font and the pinyin tables checked against the firmware, then the firmware and
+    the two blobs written, then the rows read back.
+
+    A Chinese image keeps its glyphs and its pinyin tables in the data flash (CONFIG_CJK_FONT_IN_FLASH,
+    CONFIG_PINYIN_IN_FLASH), so flashing only the firmware leaves those rows as they were: a different build's glyphs
+    draw the wrong character, and a radio that never had them draws boxes. This runs both halves in the order that
+    leaves nothing half-written.
+    """
+    b = pick_board(args.board, "prepare")
+    fonts = []
+    for what, path in (("font", args.font), ("pinyin", args.pinyin)):
+        if path is None:
+            continue
+        region = b.stub.get(what) if b.stub else None
+        if region is None:
+            if what == "font":
+                raise UsageError("%s has no font row (board.toml [flash.stub] font)" % b.name)
+            warn("%s has no pinyin row; %s not written" % (b.name, path))
+            continue
+        lo, hi = region
+        size = os.path.getsize(path)
+        block = 0x1000
+        if not size or size % block or size > hi - lo:
+            raise UsageError("%s is %d bytes: the %s row holds 0x%X bytes in whole 4 KB sectors"
+                             % (path, size, what, hi - lo))
+        # The font's own record says which index its bitmaps were built for. The firmware reports the index it looks
+        # glyphs up with, and a radio that disagrees draws the wrong character for every one of them
+        if what == "font":
+            meta = path + ".json"
+            if os.path.exists(meta):
+                try:
+                    with open(meta, encoding="utf-8") as fm:
+                        fonts.append((what, path, json.load(fm)))
+                except (OSError, ValueError) as e:
+                    raise UsageError("%s: %s" % (meta, e))
+            else:
+                warn("%s has no .json: its character count and index hash can't be checked against the firmware"
+                     % path)
+        else:
+            fonts.append((what, path, None))
+
+    # What the radio's firmware says it draws with: its cjk view (account only, its own firmware size). Asked before
+    # anything is written, so a font for another build stops here
+    table = None
+    try:
+        link = debuglink.Link(args.port) if args.port else None
+        if link is None:
+            p = debuglink.probe(log=None) if not args.no_probe else None
+            link = debuglink.Link(p["port"]) if p else None
+        if link is not None:
+            table = link.font_table()
+    except Exception:
+        table = None		# a radio in its bootloader, or one whose build has no cjk view: nothing to compare
+    if table:
+        say("firmware  %s draws %s characters, cell %s, at 0x%X" % (table.get("glyphs"), table.get("cell"),
+                                                                    table.get("addr")))
+        for what, path, meta in fonts:
+            if meta is None:
+                continue
+            if table.get("glyphs") != meta.get("glyphs"):
+                raise UsageError(
+                    "%s draws %s characters and %s holds %s: flash the firmware built with this font (both come from "
+                    "one run of tools/cjkfont.py)" % (b.name, table.get("glyphs"), path, meta.get("glyphs")))
+            if int(table.get("cell") or 0) != int(meta.get("cell") or 0):
+                raise UsageError("%s draws a %s px cell and %s is a %s px font (CONFIG_CJK_CELL)"
+                                 % (b.name, table.get("cell"), path, meta.get("cell")))
+            if table.get("index_hash") is not None and meta.get("index_hash") is not None and \
+                    table["index_hash"] != int(meta["index_hash"], 0):
+                raise UsageError("the radio's index hash is 0x%08X and %s was built with %s: they must come from the "
+                                 "same run of tools/cjkfont.py" % (table["index_hash"], path, meta["index_hash"]))
+            say("ok        %s matches the firmware's index" % path)
+    else:
+        warn("the radio did not report its glyph table (not running, or a build without CONFIG_DEBUGLINK): "
+             "the font's index can't be checked against it")
+
+    # The firmware first: a radio whose rows are already right needs no second step, and one whose firmware just
+    # changed has the index the blobs are then checked against
+    if args.image:
+        # cmd_flash's own arguments, as this command settles them: the codec kept, nothing downloaded, the board and
+        # port the user gave. --dry-run here means "check and print", so the firmware is left for the caller to flash
+        if args.dry_run:
+            say("dry run   would flash %s (kept codec), then the rows below" % args.image)
+        else:
+            fl = argparse.Namespace(image=args.image, board=args.board, port=args.port, option=args.option,
+                                    no_probe=args.no_probe, codec="keep", release=None, manifest=None, repo=None,
+                                    stock=None, stock_installed=None, key=None, yes=True, wait=120, route="auto",
+                                    dry_run=False, no_verify=False, no_version_read=False, no_reporting=True,
+                                    simulate=None)
+            rc = cmd_flash(fl)
+            if rc:
+                return rc
+    for what, path, _meta in fonts:
+        argv = ["--board", b.id, "--font-row", what, "--write-font", path]
+        if args.port:
+            argv.insert(0, args.port)
+        if args.dry_run:
+            say("dry run   would write %s to the %s row: stubtool.py %s" % (path, what, " ".join(argv)))
+            continue
+        say("%-9s %s" % (what, path))
+        rc = serialflash.tool("stubtool").main(argv)
+        if rc:
+            return rc
+        # Read it back: the row is only worth writing if it is the file that was asked for
+        check = ["--board", b.id, "--check-font", what, "--write-font", path]
+        if args.port:
+            check.insert(0, args.port)
+        rc = serialflash.tool("stubtool").main(check)
+        if rc:
+            raise UsageError("the %s row does not read back as %s" % (what, path))
+        say("ok        %s verified" % what)
+    if not fonts and not args.image:
+        raise UsageError("nothing to do: give an image, --font, or --pinyin")
+    say("done      the radio draws Chinese")
+    return 0
+
+
 def cmd_detect(args):
     p = debuglink.probe(args.port, log=say) if not args.no_probe else None
     if p:
@@ -1423,6 +1617,31 @@ def build_parser():
     d = sub.add_parser("detect", help="look for the radio: running RadioFoundry and/or in its bootloader")
     common(d)
     d.set_defaults(fn=cmd_detect)
+
+    fnt = sub.add_parser("font", help="write the CJK glyph bitmaps into the radio's data flash",
+                         formatter_class=argparse.RawDescriptionHelpFormatter)
+    fnt.add_argument("image", help="the glyph bitmaps tools/cjkfont.py --out-bin wrote")
+    fnt.add_argument("--board", help="the radio (its board.toml names the font row)")
+    fnt.add_argument("--port", help="serial port of the radio running RadioFoundry")
+    fnt.add_argument("--pinyin", action="store_true", help="the file is the pinyin tables (tools/pinyin_table.py --out-bin) for the board's pinyin row, not the glyph bitmaps")
+    fnt.add_argument("--check", action="store_true",
+                     help="read the region back and compare it with the file, writing nothing: says whether this "
+                          "file is the one the radio has")
+    fnt.add_argument("--dry-run", action="store_true", help="print what would be written and stop")
+    fnt.set_defaults(fn=cmd_font)
+
+    pr = sub.add_parser("prepare", help="a Chinese build in one go: the firmware, the glyph bitmaps and the pinyin "
+                                        "tables, checked against each other and read back",
+                        formatter_class=argparse.RawDescriptionHelpFormatter,
+                        epilog="The font file is what tools/cjkfont.py --out-bin writes; it can't ship with the "
+                               "firmware, the outline face it is rendered from is not ours to redistribute.")
+    pr.add_argument("image", nargs="?", help="the firmware image (build/<board>/rfoundry_<board>.bin)")
+    pr.add_argument("--font", help="the glyph bitmaps tools/cjkfont.py --out-bin wrote (with its .json beside it)")
+    pr.add_argument("--pinyin", help="the pinyin tables tools/pinyin_table.py --out-bin wrote")
+    pr.add_argument("--dry-run", action="store_true", help="check everything, print what would be written, write "
+                                                          "nothing")
+    common(pr)
+    pr.set_defaults(fn=cmd_prepare)
 
     k = sub.add_parser("key", help="get the bootloader key from a radio running RadioFoundry, or from a stock firmware file")
     k.add_argument("--stock", help="derive it from this stock file instead of reading it from the radio")

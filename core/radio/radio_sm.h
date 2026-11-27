@@ -201,6 +201,8 @@ typedef enum {
 	RREQ_NXDN_SET,		// radio_task.c: the pending NXDN settings were copied (radio_nxdn_set_settings); applied here
 	// New request types go above
 
+	RREQ_DSTAR_UR,		// D-STAR UR (CONFIG_DSTAR): arg = mode | ref[0..2] << 8, arg2 = ref[3..6] (radio_req_dstar_ur)
+	RREQ_DSTAR_RELOAD,	// D-STAR: the station and the bench calibration from the settings again
 	RREQ_COUNT		// KEEP LAST: sizes req_flags[] (radio_sm.c)
 } radio_req_type_t;
 

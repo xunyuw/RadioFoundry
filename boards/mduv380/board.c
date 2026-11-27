@@ -135,7 +135,9 @@ static const keymap_entry_t keymap[] = {
 	{ KEY_7, ACT_DIGIT_7, ACT_DIGIT_7, false, false, 0 },
 	{ KEY_8, ACT_DIGIT_8, ACT_DIGIT_8, false, false, 0 },
 	{ KEY_9, ACT_DIGIT_9, ACT_DIGIT_9, false, false, 0 },
-	{ KEY_SK1, ACT_MONITOR, ACT_MONITOR, true, false, 0 },
+	// SK1: short toggles between the channel and the VFO, long copies the channel's frequency to it (the pair every
+	// board with the key has, keyassignTest). Not raw edges: a hold key needs the DOWN / UP the engine sends only then
+	{ KEY_SK1, ACT_VFO_TOGGLE, ACT_COPY_VFO, false, false, 0 },
 	{ KEY_SK2, ACT_AB, ACT_USER_2, false, false, 0 },
 	{ KEY_PTT, ACT_PTT, ACT_PTT, true, false, 0 },
 };

@@ -8,6 +8,7 @@
 #include "codeplug/zone_edit.h"
 #include "board.h"
 #include "codeplug/codeplug_modes.h"	// CODEPLUG_KIND_NONE: a share leaves channels of a kind out without the modes part
+#include "codeplug/codeplug.h"		// CODEPLUG_ZONE_NAME_LEN: the zone record's field, shorter than a channel's
 #if CONFIG_ZONE_SHARE_MODES
 #include "codeplug/codeplug_kv.h"
 #include "codeplug/codeplug_tag.h"
@@ -317,8 +318,12 @@ static uint8_t find_system(const zsSystem_t *s, uint8_t *buf, uint16_t cap)
 	}
 	codeplug_kv_begin(&c, CODEPLUG_KEY_SYSTEM, CODEPLUG_KEY_SYSTEM + 0xFEu);
 	while ((len = codeplug_kv_next(&c, &key, buf, cap)) >= 0) {
-		if (len >= (int)CODEPLUG_SYS_HDR + s->idLen && buf[0] == s->type && buf[3] == s->idLen &&
-		    memcmp(&buf[CODEPLUG_SYS_HDR], s->block, s->idLen) == 0) {
+		// A record written while the name field was 16 octets puts its block 8 octets earlier, and it is the same
+		// system: compare against the header the stored length implies (codeplug_records.c reads it the same way)
+		unsigned hdr = (len >= (int)CODEPLUG_SYS_HDR || len < (int)CODEPLUG_SYS_HDR_OLD) ? CODEPLUG_SYS_HDR
+											       : CODEPLUG_SYS_HDR_OLD;
+		if (len >= (int)hdr + s->idLen && buf[0] == s->type && buf[3] == s->idLen &&
+		    memcmp(&buf[hdr], s->block, s->idLen) == 0) {
 			return (uint8_t)(key - CODEPLUG_KEY_SYSTEM);
 		}
 	}
@@ -342,7 +347,7 @@ static uint8_t add_system(const zsSystem_t *s)
 	kv_buf[1] = s->flags;		// listen only as the sender set it: a receiver never forces it (channel-modes.md 7.1)
 	kv_buf[2] = s->level;		// the sharing level it came with
 	kv_buf[3] = s->idLen;
-	strncpy((char *)&kv_buf[12], s->name, CODEPLUG_NAME_LEN);
+	strncpy((char *)&kv_buf[CODEPLUG_SYS_NAME], s->name, CODEPLUG_NAME_LEN);
 	if (s->blockLen > 0) {	// a shared system can come without a block (NULL)
 		memcpy(&kv_buf[CODEPLUG_SYS_HDR], s->block, s->blockLen);
 	}
@@ -549,18 +554,18 @@ static int find_zone(const char *name, int skip)
 // A name no other zone has: the record's, else with " 2" ... " 99"
 static void unique_name(const char *want, int skip, char out[CODEPLUG_NAME_LEN + 1])
 {
-	char base[CODEPLUG_NAME_LEN + 1];
+	char base[CODEPLUG_ZONE_NAME_LEN + 1];
 
-	strncpy(base, (want[0] != '\0') ? want : "Shared", CODEPLUG_NAME_LEN);
-	base[CODEPLUG_NAME_LEN] = '\0';
+	strncpy(base, (want[0] != '\0') ? want : "Shared", CODEPLUG_ZONE_NAME_LEN);
+	base[CODEPLUG_ZONE_NAME_LEN] = '\0';
 	strcpy(out, base);
 	for (int n = 2; n < 100 && find_zone(out, skip) >= 0; n++) {
 		char suffix[4];
 		int sl = name_number(suffix, sizeof(suffix), " ", (uint32_t)n);
 		int bl = (int)strlen(base);
 
-		if (bl + sl > CODEPLUG_NAME_LEN) {
-			bl = CODEPLUG_NAME_LEN - sl;
+		if (bl + sl > CODEPLUG_ZONE_NAME_LEN) {
+			bl = CODEPLUG_ZONE_NAME_LEN - sl;
 		}
 		while (bl > 0 && base[bl - 1] == ' ') {
 			bl--;// "Sixteen chars 2", not "Sixteen chars  2"

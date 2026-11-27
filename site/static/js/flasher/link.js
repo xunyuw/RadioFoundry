@@ -370,6 +370,39 @@ export class Link {
 		return parseKv(new TextDecoder().decode(await this.request(CMD.VERSION)));
 	}
 
+	// GET_VIEW (debuglink.md 3): one section of the radio's state as key=value, {..} ({} when the build has no such
+	// section). The reply is a 6-byte header (status, ms, the next section) and then the text
+	async view(section) {
+		const r = await this.request(CMD.GET_VIEW, new Uint8Array([section & 0xFF]));
+		return r.length > 6 ? parseKv(new TextDecoder().decode(r.subarray(6))) : {};
+	}
+
+	// The CJK table this build draws with (the cjk section, debuglink_view.c cjk_section): the glyph count, whether
+	// the bitmaps are in the data flash, where, and the index's hash. null when the build has no glyphs.
+	//
+	// The section's number is not fixed here: each GET_VIEW reply names the next section (debuglink.md 3), so the
+	// walk finds it by name. A number hard-coded in this file would move with the enum and compare the wrong table
+	async fontTable() {
+		for (let s = 0, guard = 0; guard < 64; guard++) {
+			const r = await this.request(CMD.GET_VIEW, new Uint8Array([s & 0xFF]));
+			if (r.length < 6) return null;
+			const kv = parseKv(new TextDecoder().decode(r.subarray(6)));
+			const next = r[5] === 0xFF ? -1 : r[5];
+			if (kv["section"] === "cjk") {
+				if (!kv["font.glyphs"] || kv["font.glyphs"] === "0") return null;
+				return {
+					glyphs: Number(kv["font.glyphs"]),
+					in_flash: kv["font.in_flash"] === "1",
+					addr: kv["font.addr"] ? Number(kv["font.addr"]) : null,
+					index_hash: kv["font.index_hash"] ? Number(kv["font.index_hash"]) : null,
+				};
+			}
+			if (next < 0) return null;		// walked past the last section
+			s = next;
+		}
+		return null;
+	}
+
 	// HWOPT LIST (debuglink.md 3.25): [{name, value (-1: none stored), restart, choices, state}]; state ok, ask,
 	// restart or hidden (a firmware without the key: ask while nothing is stored, else ok)
 	async hwopts() {

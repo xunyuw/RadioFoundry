@@ -127,8 +127,8 @@ static void test_list(void)
 	char name[CODEPLUG_NAME_LEN + 1];
 	zone_copy_name(name, "Local");
 	CHECK(strcmp(name, "Local 2") == 0);
-	zone_copy_name(name, "Northeast Region");	// 16 characters: cut to 14
-	CHECK(strcmp(name, "Northeast Regi 2") == 0 && strlen(name) == CODEPLUG_NAME_LEN);
+	zone_copy_name(name, "Northeast Region");	// 16: cut to 14 so the " 2" fits the zone's 16-octet field
+	CHECK(strcmp(name, "Northeast Regi 2") == 0 && strlen(name) == CODEPLUG_ZONE_NAME_LEN);
 	zone_copy_name(name, "");
 	CHECK(strcmp(name, " 2") == 0);
 }
@@ -168,6 +168,9 @@ static void test_codeplug(void)
 	CHECK(codeplug_channel(1, &c));		// removed from the zone only: the channel stays
 
 	// Rename
+	CHECK(zone_edit_rename(1, "") == ZONE_EDIT_NO_NAME);
+	// Rename. The zone's own record holds a 16-octet name whatever CODEPLUG_NAME_LEN is: the stock zone record
+	// has no room to grow (the channel record does, so channel names take 24)
 	CHECK(zone_edit_rename(1, "") == ZONE_EDIT_NO_NAME);
 	CHECK(zone_edit_rename(1, "Hotspot and more!") == ZONE_EDIT_OK && named(1, "Hotspot and more"));	// cut to 16
 	CHECK(zone_edit_rename(7, "X") == ZONE_EDIT_NO_ZONE);

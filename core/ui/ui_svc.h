@@ -54,6 +54,7 @@ extern radio_view_t ui_svc_view;
 #define UI_FEAT_REF_TRIM	(1u << 20)	// a reference trim (hal_radio_t.ref_trim, radio/ref_trim.h): Freq trim setting
 #define UI_FEAT_P25		(1u << 22)	// P25 on this board (CONFIG_P25, radio_p25_fits): the VFO's mode tile offers it
 #define UI_FEAT_NXDN		(1u << 23)	// NXDN on this board (CONFIG_NXDN, radio_nxdn_fits): the same
+#define UI_FEAT_YSF		(1u << 24)	// Fusion on this board (CONFIG_YSF, radio_ysf_fits): the same, shown as C4FM
 uint32_t ui_svc_features(void);
 // The parts of it each package reports (ui_svc_features ORs them): dmr-voice / radio core, dmr-data, storage-cps,
 // radio-features
@@ -81,11 +82,16 @@ bool ui_svc_dmr_timeslot(uint8_t ts);
 bool ui_svc_dmr_color_code(uint8_t cc);
 // The VFO's SFR role (CONFIG_SFR, sfr.md 4): a as a channel's SFR byte A; false: not in this build
 bool ui_svc_vfo_sfr(uint8_t a);
+#if CONFIG_YSF
+// Fusion's DG-ID sent (0-99): the radio's own, over the channel record's
+bool ui_svc_ysf_dgid(uint8_t dgid);
+#endif
 bool ui_svc_mode(uint8_t mode);			// radio_mode_t: the VFO's mode (a channel's goes through Copy to VFO)
 // A channel mode's name as the screens show it (radio_mode_t). A name, never translated
 static inline const char *ui_mode_name(uint8_t mode)
 {
-	return mode == RADIO_MODE_DMR ? "DMR" : mode == RADIO_MODE_P25 ? "P25" : mode == RADIO_MODE_NXDN ? "NXDN" : "FM";
+	return mode == RADIO_MODE_DMR ? "DMR" : mode == RADIO_MODE_P25 ? "P25" : mode == RADIO_MODE_NXDN ? "NXDN" :
+	       mode == RADIO_MODE_YSF ? "C4FM" : "FM";
 }
 // Copy to VFO: the channel on view into the VFO, which opens (CONFIG_VFO). Returns a radio_vfo_copy_t: VFO_COPY_OK
 // when the request went to the radio core, else why nothing changed
@@ -517,11 +523,11 @@ typedef struct {
 	};
 } ui_event_t;
 // The owner's two boot screen lines from the codeplug (storage-cps); empty strings when there are none
-void ui_svc_boot_text(char line1[17], char line2[17]);
+void ui_svc_boot_text(char line1[CODEPLUG_NAME_LEN + 1], char line2[CODEPLUG_NAME_LEN + 1]);
 // The codeplug's name fields (Settings > My radio): the radio name (8 characters; APRS takes its first word as the
 // callsign) and the two boot screen lines (16 each). Set is a storage job: false while another one is pending
 enum { UI_NAME_RADIO, UI_NAME_BOOT1, UI_NAME_BOOT2, UI_NAME_COUNT };
-void ui_svc_name_get(uint8_t which, char out[17]);
+void ui_svc_name_get(uint8_t which, char out[CODEPLUG_NAME_LEN + 1]);
 bool ui_svc_name_set(uint8_t which, const char *text);
 
 // Queue an event for the UI (copies it). False when the queue is full (the event is dropped)

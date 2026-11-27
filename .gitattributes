@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 The RadioFoundry Authors
+#
+# Shell and Python scripts run under a POSIX shell or interpreter, which reads a CR as part of a word: a checkout that
+# turned their line ends into CRLF (core.autocrlf on Windows) makes every one of them fail with "Syntax error: word
+# unexpected". Kept as LF whatever the machine, so the same tree builds in Git Bash, WSL and on the radio.
+*.sh		text eol=lf
+*.py		text eol=lf
+Makefile	text eol=lf
+*.mk		text eol=lf
+
+# The site's JavaScript: its tests read these files as text and match exact source lines (site/tests/buildfit.test.mjs
+# and the rest), so a CRLF checkout fails them on a machine where nothing is wrong
+*.js		text eol=lf
+*.mjs		text eol=lf
+*.json		text eol=lf
+
+# The test vectors: the host tests compare them byte for byte with what the generator prints (tests/host/Makefile
+# run-dstar), and the generators print LF
+tests/vectors/*	text eol=lf
+
+# Markdown: tools/license_grep.sh and the docs checks match whole lines ("## Acknowledgements", "## 致谢" and the
+# rest), and a CR the shell keeps makes every such comparison miss
+*.md		text eol=lf
+
+# Everything else may take the platform's line ends: the editors here write CRLF and nothing in the build reads those
+# files a line at a time
+*		text=auto

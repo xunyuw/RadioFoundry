@@ -30,7 +30,8 @@ import { verify, segments, forDevBuild } from "./manifest.js";
 import { Dfu, DfuError, NormalModeError, WebUsbTransport, checkKey, usbSupported } from "./dfu.js";
 import { Link, LinkError, CableError, SerialStream, RFOUNDRY_USB, RFOUNDRY_NET, CABLES, probe, whyNoAnswer, noAnswerKey, serialSupported, serialApi, browserErrorKey, noDeviceChosen, knownRadioPort } from "./link.js";
 import { readRadio, makeBundle, openBundle, bundleFolder, notBundle, bundleName, describeFirmware, CODEPLUG_SPAN } from "./backup.js";
-import { targets, planInternal, planStock, codeplugSectors, writeCodeplug, codeplugLayout } from "./restore.js";
+import { targets, planInternal, planStock, codeplugSectors, writeCodeplug, codeplugLayout,
+	fontRow, pinyinRow, checkRowFile, writeRow, rowsFromBundle } from "./restore.js";
 import { Selection } from "./select.js";
 import { codecPresent, decideCodec, DecisionError } from "./decide.js";
 import { tooBig } from "./buildfit.js";
@@ -368,6 +369,7 @@ const STEPS = {
 	backup: ["radio", "backup"],
 	restart: ["radio", "restart"],
 	restore: ["bundle", "restore"],
+	font: ["radio", "font"],
 	help: ["radio", "symptom", "recover"],
 };
 // An update before the radio is known; its backend then says how it is reached (backends.js)
@@ -827,7 +829,7 @@ function render() {
 	// a step this browser can't run (no WebUSB or Web Serial): the manual install kit in its place
 	const missing = S.radio && !S.sim && missingApi(S.radio, S.task, step, { usb: usbSupported(), serial: serialSupported(), stub: stubRoute() });
 	const view = (missing && (() => kitView(missing))) || (step === "restore" && bundleBackend(S.bundle)?.views.restore) || (S.radio && backend().views[step])
-		|| { update: updateView, radio: radioView, build: buildView, bundle: bundleView, symptom: symptomView, recover: recoverView, restart: restartView }[step];
+		|| { update: updateView, radio: radioView, build: buildView, bundle: bundleView, symptom: symptomView, recover: recoverView, restart: restartView, font: fontView }[step];
 	if (!missing && transferStep()) app.append(h("p", { class: "notice bad" }, h("strong", {}, t("flash.stay_on_page"))));
 	app.append(view());
 	app.append(h("div", { class: "nav-bar" },
@@ -891,7 +893,7 @@ function startView() {
 		...support,
 		panel(t("flash.start.title"),
 			h("div", { class: "choice-grid" }, choice("update", "⟳"), choice("install", "⤓"), choice("backup", "⎘"), choice("restore", "↺"), choice("restart", "⏻"),
-				choice("help", "?"))),
+				choice("font", "字"), choice("help", "?"))),
 		h("details", { class: "small" }, h("summary", {}, t("flash.start.privacy_title")), h("p", {}, t("flash.start.privacy"))),
 		h("p", { class: "small muted" }, S.sim ? h("a", { href: "#", onclick: (e) => { e.preventDefault(); location.hash = ""; location.reload(); } }, t("flash.sim.leave"))
 			: simLinks()));
@@ -2804,6 +2806,82 @@ function backupView() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// font task: the Chinese glyph bitmaps and the pinyin tables, into the two data flash rows the board names
+// (board.toml [flash.stub] font and pinyin, in the registry). A radio whose build keeps its glyphs inside the
+// firmware image has no rows, and the step says so instead of offering a file picker
+
+const fontRowOf = (what) => (what === "pinyin" ? pinyinRow : fontRow)(fb().boards[S.radio?.flash?.board]);
+
+function fontView() {
+	const rows = [["font", t("flash.font.glyphs")], ["pinyin", t("flash.font.pinyin")]]
+		.map(([what, label]) => ({ what, label, row: fontRowOf(what) }))
+		.filter((x) => x.row || x.what === "font");
+	const missing = rows.filter((x) => !x.row);
+	if (rows.every((x) => !x.row)) {
+		S.forward(button(t("flash.nav.back"), () => back(), { primary: true }));
+		return panel(t("flash.font.title"), notice(t("flash.font.no_row", { what: t("flash.font.glyphs").toLowerCase() }), "info"));
+	}
+	const files = {};
+	const pickers = rows.filter((x) => x.row).map((x) => {
+		const status = h("span", { class: "small muted" }, "");
+		const input = h("input", { type: "file", accept: ".bin", onchange: async () => {
+			const f = input.files?.[0];
+			if (!f) { files[x.what] = null; status.textContent = ""; return; }
+			const data = new Uint8Array(await f.arrayBuffer());
+			const bad = checkRowFile(x.row, data.length, x.label);
+			if (bad) { files[x.what] = null; status.textContent = bad; status.className = "small bad"; return; }
+			files[x.what] = data;
+			status.textContent = `${data.length} B`;
+			status.className = "small muted";
+		} });
+		return h("div", { class: "field" }, h("label", {}, h("strong", {}, x.label)), input, status);
+	});
+	const progress = progressBar();
+	const say = (n) => progress.el.replaceWith(n);
+
+	const go = button(t("flash.nav.continue"), async () => {
+		const todo = rows.filter((x) => x.row && files[x.what]);
+		if (!todo.length) return;
+		const box = h("div", {}, progress.el);
+		S.forward(null);
+		say(box);
+		try {
+			const link = await connectSerial();
+			if (!S.now) {
+				const p = await probe(link);
+				if (!p) throw await noAnswer(link);
+				S.now = await rfoundryNow(link, p);
+			}
+			if (!f4Board()) throw new Error(t("flash.err.no_serial"));
+			// The stub writes any 4 KB sector of the data flash; the CPS only reaches the codeplug's areas
+			const stub = new F4Stub(link.s, { log: () => {}, reopen: reopenRFoundryPort, board: f4Board() });
+			S.link = null;			// the port belongs to the loader from here
+			const json = await f4StubJson();
+			await stub.enterFromRFoundry(f4Image(json), (d, n) => progress.set(d, n, t("flash.font.entering")), { entry: json.run });
+			const done = [];
+			for (const x of todo) {
+				progress.set(0, 1, t("flash.font.writing", { what: x.label }));
+				// The stub compares each sector's CRC and writes only what differs, then verifies what it wrote, so
+				// `same` here means the row already held this exact file: said, so a radio that was right all along
+				// does not read as a write that hung
+				const r = await writeRow(stub, x.row, files[x.what], (d, n) => progress.set(d, n, t("flash.font.writing", { what: x.label })));
+				diag.note("font written", { what: x.what, ...r });
+				done.push(r?.same ? t("flash.font.already", { what: x.label }) : t("flash.font.wrote", { what: x.label }));
+			}
+			progress.el.remove();
+			say(notice(`${done.join(" ")} ${t("flash.font.done")}`, "ok"));
+		} catch (e) {
+			diag.error("flash/font", e);
+			progress.el.remove();
+			say(notice(t("flash.font.err", { why: errorText(e) }), "bad"));
+		}
+	}, { primary: true });
+	S.forward(go);
+	return panel(t("flash.font.title"), h("p", {}, t("flash.font.lead")), ...pickers,
+		missing.length ? notice(t("flash.font.no_row", { what: missing.map((x) => x.label.toLowerCase()).join(", ") }), "info") : null);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // restart task: a radio left in an update mode. A radio whose backend has a loader to leave draws its own step
 // (c7000ui.js restartView); for the others the page has no loader to talk to, so it says how to power-cycle
 
@@ -2952,6 +3030,28 @@ function afterRestore() {
 			const refused = await writeCodeplug(link, sectors, (d, n) => prog.set(d, n, t("flash.restore.writing_codeplug")));
 			status.append(notice(refused.length ? t("flash.restore.codeplug_refused", { n: refused.length, total: sectors.length })
 				: t("flash.restore.codeplug_done", { n: sectors.length }), refused.length ? "" : "ok"));
+			// The font and pinyin rows a backup with the whole chip holds go back too: the codeplug areas stop at
+			// 0x120000 and the rows sit far above them
+			const rows = rowsFromBundle(S.bundle, S.board);
+			if (rows.length) {
+				try {
+					await dropSerial();
+					const again = await connectSerial();
+					const stub = new F4Stub(again.s, { log: () => {}, reopen: reopenRFoundryPort, board: f4Board() });
+					S.link = null;
+					const json = await f4StubJson();
+					await stub.enterFromRFoundry(f4Image(json), (d, n) => prog.set(d, n, t("flash.font.entering")), { entry: json.run });
+					for (const x of rows) {
+						const r = await writeRow(stub, x.row, x.data, (d, n) =>
+							prog.set(d, n, t("flash.font.writing", { what: t(x.what === "pinyin" ? "flash.font.pinyin" : "flash.font.glyphs") })));
+						diag.note("restore: font row", { what: x.what, ...r });
+					}
+				} catch (e) {
+					// the codeplug is back already: say what did not go, do not fail the whole restore for it
+					diag.error("restore/font", e);
+					status.append(notice(t("flash.font.err", { why: errorText(e) }), "bad"));
+				}
+			}
 			S.forward(button(t("flash.nav.finish"), () => reset(), { primary: true }));
 		} catch (e) {
 			status.append(connectError(e), serialHelp());

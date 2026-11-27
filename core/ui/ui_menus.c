@@ -13,6 +13,10 @@
 #include "font.h"
 #include "fmt.h"
 #include "text_edit.h"
+#if CONFIG_PINYIN
+#include "pinyin.h"
+#include "cjk_font.h"		// CJK_FONT_W: a candidate is one cell wide
+#endif
 #include "codeplug/codeplug.h"
 #include "codeplug/codeplug_modes.h"
 #include "codeplug/codeplug_tag.h"
@@ -56,6 +60,7 @@
 
 extern const ui_scr_def_t ui_find_screen;
 extern const ui_scr_def_t ui_aprs_screen, ui_aprs_heard_screen, ui_aprs_station_screen;	// ui_aprs.c
+extern const ui_scr_def_t ui_dstar_screen;	// ui_dstar.c
 #if CONFIG_POSITION
 extern const ui_scr_def_t ui_fixed_pos_screen;	// ui_position.c
 #endif
@@ -1311,6 +1316,17 @@ static bool ced_is_nxdn(const channel_t *ch)
 {
 	return CONFIG_NXDN && (ch->kind == CODEPLUG_KIND_NXDN || (ch->kind == CODEPLUG_KIND_NONE && ch->mode == RADIO_MODE_NXDN));
 }
+
+// A channel of a kind that runs its own voice mode over the stand-in record (D-STAR, Fusion: channel-modes.md 2.3):
+// the record says DMR, receive only, but the radio core runs the kind's mode and takes transmit allowed from the tag.
+// None of the record's DMR fields (contact, color code, slot, group list, ID) or FM fields (width, tones, which the
+// mode sets itself) are its own, so the editor neither shows nor checks them. P25, NXDN and the trunked kinds use the
+// record's contact and ID, so they are not among these; AES is DMR's own with a key, so neither is it
+static bool ced_own_mode(const channel_t *ch)
+{
+	return ch->kind != CODEPLUG_KIND_NONE && ch->kind != CODEPLUG_KIND_P25 && ch->kind != CODEPLUG_KIND_NXDN &&
+	       ch->kind != CODEPLUG_KIND_DMR_AES && !codeplug_kind_trunked(ch->kind);
+}
 #endif
 
 // A trunked channel whose system isn't set up (dmr-trunking-codeplug.md 4) is locked out: selecting it says why
@@ -2095,7 +2111,7 @@ uint8_t ui_menus_zones_moved(ui_frame_t *stack, uint8_t sp, uint32_t from, uint3
 }
 #endif
 
-#if CONFIG_CHANNEL_EDIT || CONFIG_APRS_AFSK || CONFIG_DMR_SMS || CONFIG_SATELLITE_TLE
+#if CONFIG_CHANNEL_EDIT || CONFIG_APRS_AFSK || CONFIG_DMR_SMS || CONFIG_DSTAR || CONFIG_SATELLITE_TLE
 // ======================= Text entry: keypad letters (ui.md 2.1) =======================
 // Phone keypad: in ABC / abc, 2-9 cycle their letters, the digit, then the letters in the other case (ABC: A B C 2 a b
 // c); 1 cycles punctuation and 0 a space, 0 and a few signs. The same key within 1 s takes the next one, another key
@@ -2109,14 +2125,31 @@ uint8_t ui_menus_zones_moved(ui_frame_t *stack, uint8_t sp, uint32_t from, uint3
 static char *text_target;
 static void (*text_done)(void);		// called once the text is kept (NULL: none)
 static uint8_t text_max;
-static char text_name_buf[CODEPLUG_NAME_LEN + 1];
+// A name, or a field of D-STAR's up to its 20-character message
+#define TEXT_FIELD_MAX	(CODEPLUG_NAME_LEN > 20 ? CODEPLUG_NAME_LEN : 20)
+static char text_name_buf[TEXT_FIELD_MAX + 1];
 static char *text_buf;
 static uint8_t text_len;
 static int8_t text_key = -1;		// the key that typed the last character, -1 = none to cycle
 static uint8_t text_idx;
 static uint32_t text_ms;
-enum { TEXT_UPPER, TEXT_DIGITS, TEXT_LOWER, TEXT_MODES };	// the order # cycles through
+enum { TEXT_UPPER, TEXT_DIGITS, TEXT_LOWER,
+#if CONFIG_PINYIN
+	TEXT_PINYIN,			// last: # reaches it from abc, and it needs a wide language's face
+#endif
+	TEXT_MODES };			// the order # cycles through
 static uint8_t text_mode;
+#if CONFIG_PINYIN
+// The keypad digits typed in the pinyin mode (T9), the characters they can spell, and the page of them the bar shows.
+// A digit is 2..9; the candidates are BMP code points
+static uint8_t pinyin_digits[PINYIN_LETTERS_MAX];
+static uint8_t pinyin_len;
+#define PINYIN_PAGE	8		// candidates in the bar: 8 fits a 128 px line at the 6x12 font and leaves the count
+static uint16_t pinyin_cand[PINYIN_PAGE];
+static uint8_t pinyin_cand_n;
+static uint16_t pinyin_next;		// where the following page starts, 0 = none
+static uint8_t pinyin_pick;		// which candidate OK would take
+#endif
 #if CONFIG_SATELLITE_TLE
 static uint8_t satellite_text_line;
 #endif
@@ -2132,23 +2165,29 @@ static void text_open(char *target, uint8_t max, uint8_t screen)
 	text_target = target;
 	text_done = NULL;
 	text_buf = screen == SCR_MESSAGE_TEXT ? message_buffer : text_name_buf;
+	// A D-STAR field (ui_text_field) may be longer than a name: the slow data message is 20 characters
+	uint8_t cap = screen == SCR_DSTAR_TEXT ? TEXT_FIELD_MAX : CODEPLUG_NAME_LEN;
+	text_max = screen == SCR_MESSAGE_TEXT ? max : (max < cap ? max : cap);
+	// D-STAR's fields are callsigns (a reflector, MY, the suffix) but for the message, the one longer than 8
+	text_prefix = screen == SCR_MESSAGE_TEXT ? TEXT_MESSAGE : screen == SCR_APRS_TO ? TEXT_CALLSIGN :
+		screen == SCR_DSTAR_TEXT ? (max > 8 ? TEXT_MESSAGE : TEXT_CALLSIGN) : TEXT_NAME;
 #if CONFIG_SATELLITE_TLE
-	if (screen == SCR_SATELLITE_TEXT)
+	if (screen == SCR_SATELLITE_TEXT) {
 		text_buf = target;
-	text_max = screen == SCR_SATELLITE_TEXT ? max :
-		(screen == SCR_MESSAGE_TEXT ? max : (max < CODEPLUG_NAME_LEN ? max : CODEPLUG_NAME_LEN));
-#else
-	text_max = screen == SCR_MESSAGE_TEXT ? max :
-		(max < CODEPLUG_NAME_LEN ? max : CODEPLUG_NAME_LEN);
-#endif
-	text_prefix = screen == SCR_MESSAGE_TEXT ? TEXT_MESSAGE :
-		screen == SCR_APRS_TO ? TEXT_CALLSIGN : TEXT_NAME;
-#if CONFIG_SATELLITE_TLE
-	if (screen == SCR_SATELLITE_TEXT)
+		text_max = max;
 		text_prefix = TEXT_SATELLITE;
+	}
 #endif
 	ui_push(screen, 0);
 }
+
+#if CONFIG_DSTAR
+void ui_text_field(char *target, uint8_t max, void (*done)(void))
+{
+	text_open(target, max, SCR_DSTAR_TEXT);
+	text_done = done;
+}
+#endif
 
 #if CONFIG_DMR_SMS || CONFIG_APRS_AFSK
 static void message_text_kept(void)
@@ -2188,6 +2227,11 @@ static void text_enter(void)
 	text_len = (uint8_t)strlen(text_buf);
 	text_key = -1;
 	text_mode = TEXT_UPPER;
+#if CONFIG_PINYIN
+	pinyin_len = 0;
+	pinyin_cand_n = 0;
+	pinyin_pick = 0;
+#endif
 }
 
 static char text_case(char c)
@@ -2223,8 +2267,78 @@ static void text_append(char c)
 	text_buf[text_len] = 0;
 }
 
+#if CONFIG_PINYIN
+// A code point as the 3-byte UTF-8 a name holds (BMP only, the same form gfx_utf8_next decodes)
+static uint8_t utf8_put(char *dst, uint32_t cp)
+{
+	if (cp < 0x800u) {
+		return 0;			// two bytes: a name never holds one (the face has no such glyph)
+	}
+	dst[0] = (char)(0xE0u | (cp >> 12));
+	dst[1] = (char)(0x80u | ((cp >> 6) & 0x3Fu));
+	dst[2] = (char)(0x80u | (cp & 0x3Fu));
+	return 3;
+}
+
+// One page of candidates for the digits typed so far
+static void pinyin_refresh(void)
+{
+	pinyin_cand_n = (uint8_t)pinyin_candidates_t9(pinyin_digits, pinyin_len, 0, pinyin_cand, PINYIN_PAGE,
+						      &pinyin_next);
+	pinyin_pick = 0;
+}
+
+// The page after the bar's last one, and back to the first past the end: the bar is the whole way through a reading
+static void pinyin_page(bool forward)
+{
+	if (!forward) {
+		pinyin_refresh();
+		return;
+	}
+	if (pinyin_next == 0) {
+		pinyin_refresh();			// the last page: round to the first
+		return;
+	}
+	uint16_t from = pinyin_next;
+	uint16_t n = pinyin_candidates_t9(pinyin_digits, pinyin_len, from, pinyin_cand, PINYIN_PAGE, &pinyin_next);
+	if (n == 0) {
+		pinyin_refresh();
+		return;
+	}
+	pinyin_cand_n = (uint8_t)n;
+	pinyin_pick = 0;
+}
+
+// The character picked, into the name as UTF-8, and the letters start over
+static void pinyin_take(void)
+{
+	if (pinyin_pick >= pinyin_cand_n)
+		return;
+	char utf8[3];
+	uint8_t n = utf8_put(utf8, pinyin_cand[pinyin_pick]);
+	if (n == 0 || text_len + n > text_max) {
+		ui_toast(TR(TEXT_TOAST_FULL, "That's the most it can hold"));
+		return;
+	}
+	for (uint8_t i = 0; i < n; i++)
+		text_buf[text_len++] = utf8[i];
+	text_buf[text_len] = 0;
+	pinyin_len = 0;
+	pinyin_refresh();
+}
+#endif
+
 static void text_draw(void)
 {
+#if CONFIG_PINYIN
+	static const tr_id_t prefixes[TEXT_PREFIXES] = { TRN(LABEL_NAME, "Name"), TRN(WORD_MESSAGE, "Message"),
+#if CONFIG_SATELLITE_TLE
+		TRN(TEXT_TITLE_CALLSIGN, "Callsign"), TRN(SATELLITE_2, "Satellite") };
+#else
+		TRN(TEXT_TITLE_CALLSIGN, "Callsign") };
+#endif
+	static const char *const modes[TEXT_MODES] = { "ABC", "123", "abc", "PIN" };
+#else
 	static const tr_id_t prefixes[TEXT_PREFIXES] = { TRN(LABEL_NAME, "Name"), TRN(WORD_MESSAGE, "Message"),
 #if CONFIG_SATELLITE_TLE
 		TRN(TEXT_TITLE_CALLSIGN, "Callsign"), TRN(SATELLITE_2, "Satellite") };
@@ -2232,6 +2346,7 @@ static void text_draw(void)
 		TRN(TEXT_TITLE_CALLSIGN, "Callsign") };
 #endif
 	static const char *const modes[TEXT_MODES] = { "ABC", "123", "abc" };
+#endif
 #if CONFIG_SATELLITE_TLE
 	static const tr_id_t satellite_titles[2][TEXT_MODES] = {
 		{ TRN(SATELLITE_TLE_TITLE_LINE1_UPPER, "1 ABC"), TRN(SATELLITE_TLE_TITLE_LINE1_NUMERIC, "1 123"),
@@ -2289,6 +2404,30 @@ static void text_draw(void)
 		y += L->small->h;
 	} while (start_char < text_len + 1);
 
+#if CONFIG_PINYIN
+	// In the pinyin mode a bar above the hint shows the digits typed and the characters they spell; the one OK
+	// would take is drawn on the highlight background. One line: a 160x128 panel has no row to spare
+	if (text_mode == TEXT_PINYIN) {
+		int bar = L->hint_y - L->small->h;	// the row the count sits in; the letters sit left of it
+		char pb[PINYIN_LETTERS_MAX + 2];
+		sb_init(&b, pb, sizeof pb);
+		for (uint8_t i = 0; i < pinyin_len; i++)
+			sb_chr(&b, (char)('0' + pinyin_digits[i]));
+		sb_chr(&b, pinyin_len > 0 ? '_' : ' ');
+		gfx_text(L->small, 0, bar, pb, ui_col.fg);
+		int x = gfx_text_width(L->small, pb) + 2;
+		for (uint8_t i = 0; i < pinyin_cand_n && x + CJK_FONT_W <= gfx_width(); i++) {
+			char cell[4];
+			uint8_t n = utf8_put(cell, pinyin_cand[i]);
+			cell[n] = 0;
+			if (i == pinyin_pick)
+				gfx_fill(x, bar, CJK_FONT_W, L->small->h, ui_col.focus);
+			gfx_text(L->small, x, bar, cell, i == pinyin_pick ? ui_col.focus_fg : ui_col.fg);
+			x += CJK_FONT_W;
+		}
+	}
+#endif
+
 	// TRN only marks the text for the catalog: tr() translates it where it is shown (list_draw did this before)
 	if (text_prefix != TEXT_MESSAGE)
 		ui_draw_hint(tr(TRN(TEXT_HINT_KEEP, TEXT_ALT_OPEN "Back delete  # ABC/123/abc  OK keep" TEXT_ALT_NEXT "Back del  # mode  OK" TEXT_ALT_CLOSE)), false);
@@ -2306,6 +2445,21 @@ static bool text_key_fn(const input_event_t *ev)
 	if (ev->action >= ACT_DIGIT_0 && ev->action <= ACT_DIGIT_9 && press) {
 		int8_t k = (int8_t)(ev->action - ACT_DIGIT_0);
 		const char *set = keys[k];
+#if CONFIG_PINYIN
+		if (text_mode == TEXT_PINYIN) {
+			// T9: a key is a digit of the reading, not a letter to cycle. "7464" is p-i-n-g and every other reading
+			// on those keys, which is what a phone does and what a six-letter reading needs (multi-tap would be 23
+			// presses for "zhuang"). 0 and 1 carry no letters, so they add nothing.
+			if (k >= 2 && pinyin_len < PINYIN_LETTERS_MAX) {
+				pinyin_digits[pinyin_len++] = (uint8_t)k;
+				pinyin_refresh();
+				ui_dirty();
+				return true;
+			}
+			ui_dirty();
+			return true;
+		}
+#endif
 		if (text_mode == TEXT_DIGITS || ev->gesture == GESTURE_LONG) {
 			text_append((char)('0' + k));	// 123, or a held digit: the digit itself
 			text_key = -1;
@@ -2325,6 +2479,22 @@ static bool text_key_fn(const input_event_t *ev)
 	int dir = ev->action == ACT_NAV_UP ? 1 : ev->action == ACT_NAV_DOWN ? -1 :
 		ev->action == ACT_ENC_STEP ? (ev->value > 0 ? 1 : -1) : 0;
 	if (dir != 0 && ev->gesture != GESTURE_UP) {
+#if CONFIG_PINYIN
+		if (text_mode == TEXT_PINYIN && pinyin_cand_n > 0) {
+			// The encoder and Up/Down walk the bar's candidates; past its end the next page of them
+			int next = (int)pinyin_pick + dir;
+			if (next < 0) {
+				pinyin_page(false);		// back to the first page
+			} else if (next >= (int)pinyin_cand_n) {
+				pinyin_page(true);		// the next page, or round to the first
+			} else {
+				pinyin_pick = (uint8_t)next;
+			}
+			text_key = -1;
+			ui_dirty();
+			return true;
+		}
+#endif
 		// Step the last character through the printable ones (the way in without a keypad); down past the space
 		// deletes it
 		if (text_len == 0) {
@@ -2343,15 +2513,37 @@ static bool text_key_fn(const input_event_t *ev)
 	if (ev->action == ACT_CONTEXT && ev->gesture == GESTURE_PRESS) {
 		text_mode = (uint8_t)((text_mode + 1u) % TEXT_MODES);
 		text_key = -1;	// the next key starts a new character
+#if CONFIG_PINYIN
+		if (text_mode != TEXT_PINYIN) {
+			pinyin_len = 0;		// leaving the mode drops the letters typed and not taken
+			pinyin_cand_n = 0;
+		}
+#endif
 		ui_dirty();
 		return true;
 	}
+#if CONFIG_PINYIN
+	if (text_mode == TEXT_PINYIN && text_len == 0 && pinyin_len == 0 && ev->action == ACT_BACK &&
+			ev->gesture == GESTURE_PRESS) {
+		ui_pop();			// nothing typed at all: BACK leaves
+		return true;
+	}
+#endif
 	if (ev->action == ACT_BACK && ev->gesture == GESTURE_PRESS && text_len == 0) {
 		ui_pop();	// an empty field: BACK leaves, the name as it was
 		return true;
 	}
 	if (((ev->action == ACT_BACK || ev->action == ACT_NAV_LEFT) && ev->gesture == GESTURE_PRESS) ||
 			(ev->action == ACT_QUICK && press)) {	// a slow * deletes too (it doesn't lock here)
+#if CONFIG_PINYIN
+		if (text_mode == TEXT_PINYIN && pinyin_len > 0) {
+			pinyin_len--;		// BACK drops one digit of the reading, not a character of the name
+			pinyin_refresh();
+			text_key = -1;
+			ui_dirty();
+			return true;
+		}
+#endif
 		if (text_len > 0) {
 			// Drop the last character whole: three bytes for a Chinese name, one otherwise (a Latin-1
 			// or font glyph byte is one character too). text_edit_backspace() decides the length.
@@ -2363,6 +2555,14 @@ static bool text_key_fn(const input_event_t *ev)
 		return true;
 	}
 	if (ev->action == ACT_SELECT && press) {
+#if CONFIG_PINYIN
+		if (text_mode == TEXT_PINYIN && pinyin_cand_n > 0) {
+			pinyin_take();			// OK takes the highlighted candidate; the letters start over
+			text_key = -1;
+			ui_dirty();
+			return true;
+		}
+#endif
 		if (!(board.caps & CAP_KEYPAD) && ev->gesture == GESTURE_PRESS) {
 			text_append(text_len > 0 ? text_buf[text_len - 1] : 'A');	// the next character, started as this one
 		} else {
@@ -2377,6 +2577,13 @@ static bool text_key_fn(const input_event_t *ev)
 	}
 	return false;
 }
+
+#if CONFIG_DSTAR
+// D-STAR's text fields (ui_text_field: a reflector to link, MY, the suffix, the message) on the shared editor
+static const ui_scr_def_t dstar_text_screen = {
+	.name = "dstar_text", .flags = 0, .key = text_key_fn, .enter = text_enter, .draw = text_draw,
+};
+#endif
 
 #if CONFIG_CHANNEL_EDIT
 static const ui_scr_def_t text_screen = {
@@ -2896,7 +3103,8 @@ static void ced_build(void)
 {
 	bool listen = radio_listen_band(ced_ch.rx_hz);
 	bool p25 = ced_is_p25(&ced_ch), nxdn = ced_is_nxdn(&ced_ch), air = p25 || nxdn;
-	bool dmr = CONFIG_DMR && ced_ch.mode == RADIO_MODE_DMR && !listen && !air;
+	bool own = ced_own_mode(&ced_ch);
+	bool dmr = CONFIG_DMR && ced_ch.mode == RADIO_MODE_DMR && !listen && !air && !own;
 	bool edit = CONFIG_CHANNEL_EDIT;
 	bool fresh = false, changed = false, into = false;
 #if CONFIG_CHANNEL_EDIT
@@ -2919,7 +3127,7 @@ static void ced_build(void)
 				       (r == CE_CODE && !into) || (r == CE_RATE && nxdn && !into));
 		if (r == CE_CODE || r == CE_RATE ? !air_row : air && (fm_only || (dmr_only && !air_row)))
 			continue;
-		if (!air_row && ((fm_only && dmr) || (tone && listen) || (dmr_only && !dmr) || (r == CE_MODE && !CONFIG_DMR)))
+		if (!air_row && ((fm_only && (dmr || own)) || (tone && listen) || (dmr_only && !dmr) || (r == CE_MODE && !CONFIG_DMR)))
 			continue;
 		// The radio core skips the burst on a board with no TX tone, so no row for it there (a host board
 		// without a radio keeps the row)
@@ -3330,7 +3538,8 @@ static const char *ced_problem(void)
 		return TR(CHAN_WHY_RX_ONLY_BAND_SET_FM, "Receive only band: set FM");
 	// The contact is whom PTT calls, so a channel that never transmits needs none
 	// (P25 and NXDN: none is talk group 1)
-	if (CONFIG_DMR && c->mode == RADIO_MODE_DMR && !c->rx_only && c->contact == 0 && !ced_is_p25(c) && !ced_is_nxdn(c))
+	if (CONFIG_DMR && c->mode == RADIO_MODE_DMR && !c->rx_only && c->contact == 0 && !ced_is_p25(c) && !ced_is_nxdn(c) &&
+	    !ced_own_mode(c))
 		return TR(CHAN_WHY_PICK_TX_CONTACT, "Pick a TX contact first");
 #if CONFIG_NXDN
 	// A DMR channel's own ID kept when the Mode row made it NXDN: past NXDN's range, as the ID row refuses it
@@ -6615,7 +6824,8 @@ static const tr_id_t n_possend[] = { TRN(VALUE_OFF, "Off"), TRN(VALUE_1_MIN, "1 
 // Side keys (core/input/keyassign.h, KEYFN_* values): monitor needs the key held, so it is a press only;
 // emergency is hold to activate, so a long press only
 static const int16_t v_keyfn_press[] = { KEYFN_DEFAULT, KEYFN_NONE, KEYFN_MONITOR, KEYFN_TALK_TARGET, KEYFN_POWER,
-					 KEYFN_ZONE_UP, KEYFN_ZONE_DOWN, KEYFN_SCAN, KEYFN_SCAN_SKIP, KEYFN_KEY_LOCK,
+					 KEYFN_ZONE_UP, KEYFN_ZONE_DOWN, KEYFN_SCAN, KEYFN_SCAN_SKIP, KEYFN_MONITOR_TOGGLE,
+					 KEYFN_KEY_LOCK,
 					 KEYFN_HOME_ZONE,
 #if CONFIG_FM_TX_TONES
 					 KEYFN_TONE_BURST,
@@ -6635,7 +6845,8 @@ static const tr_id_t n_keyfn_press[] = { TRN(VALUE_DEFAULT, "Default"), TRN(KEYF
 					     TRN(KEYFN_VALUE_POWER_LEVEL, "Power level"),
 					TRN(KEYFN_VALUE_NEXT_ZONE, "Next zone"),
 					TRN(KEYFN_VALUE_PREV_ZONE, "Prev zone"), TRN(WORD_SCAN, "Scan"),
-					     TRN(KEYFN_VALUE_SCAN_SKIP, "Scan skip"), TRN(WORD_KEY_LOCK, "Key lock"), TRN(KEYFN_VALUE_HOME_ZONE, "Home zone"),
+					     TRN(KEYFN_VALUE_SCAN_SKIP, "Scan skip"), TRN(KEYFN_VALUE_MONITOR_TOGGLE, "Monitor toggle"),
+					     TRN(WORD_KEY_LOCK, "Key lock"), TRN(KEYFN_VALUE_HOME_ZONE, "Home zone"),
 #if CONFIG_FM_TX_TONES
 					     TRN(WORD_TONE_BURST, "Tone burst"),
 #endif
@@ -6652,7 +6863,7 @@ static const tr_id_t n_keyfn_press[] = { TRN(VALUE_DEFAULT, "Default"), TRN(KEYF
 #endif
 };
 static const int16_t v_keyfn_hold[] = { KEYFN_DEFAULT, KEYFN_NONE, KEYFN_TALK_TARGET, KEYFN_POWER, KEYFN_ZONE_UP,
-					KEYFN_ZONE_DOWN, KEYFN_SCAN, KEYFN_SCAN_SKIP,
+					KEYFN_ZONE_DOWN, KEYFN_SCAN, KEYFN_SCAN_SKIP, KEYFN_MONITOR_TOGGLE,
 #if CONFIG_DMR_EMERGENCY
 					KEYFN_EMERGENCY,
 #endif
@@ -6671,7 +6882,7 @@ static const tr_id_t n_keyfn_hold[] = { TRN(VALUE_DEFAULT, "Default"), TRN(KEYFN
 	TRN(KEYFN_VALUE_TALK_TARGET, "Talk target"), TRN(KEYFN_VALUE_POWER_LEVEL, "Power level"),
 					    TRN(KEYFN_VALUE_NEXT_ZONE, "Next zone"),
 					TRN(KEYFN_VALUE_PREV_ZONE, "Prev zone"), TRN(WORD_SCAN, "Scan"),
-					TRN(KEYFN_VALUE_SCAN_SKIP, "Scan skip"),
+					TRN(KEYFN_VALUE_SCAN_SKIP, "Scan skip"), TRN(KEYFN_VALUE_MONITOR_TOGGLE, "Monitor toggle"),
 #if CONFIG_DMR_EMERGENCY
 					    TRN(TITLE_EMERGENCY, "Emergency"),
 #endif
@@ -8222,6 +8433,9 @@ const ui_scr_def_t *const ui_scr[SCR_COUNT] = {
 #endif
 #if CONFIG_DMR_SMS || CONFIG_APRS_AFSK
 	[SCR_MESSAGE_TEXT] = &message_text_screen,
+#endif
+#if CONFIG_DSTAR
+	[SCR_DSTAR] = &ui_dstar_screen, [SCR_DSTAR_TEXT] = &dstar_text_screen,
 #endif
 #if CONFIG_CHANNEL_LIST
 	[SCR_CHANNELS] = &chlist_screen, [SCR_CHANNEL] = &chinfo_screen,
