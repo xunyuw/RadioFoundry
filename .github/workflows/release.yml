@@ -286,14 +286,16 @@ jobs:
             TITLE="$TAG (unofficial build)"
             NOTES=$(printf '%s\n\n%s' "**This is not an official RadioFoundry release.** It was built from a modified tree, and the RadioFoundry project does not support it: ask whoever published it." "$NOTES")
           fi
-          # Create it, or find the one the manual workflow made. gh's own exit status decides, and the release is read
-          # back after creating: a job that reports success must leave a release behind
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "release $TAG already exists"
+          # Create it, or find the one the manual workflow made. Every gh call prints what it did and where: a job that
+          # reports success must leave a release behind, and one that does not says why on its own log
+          echo "repo under test: $(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+          echo "token scopes: ${GH_TOKEN:+set}"
+          if EXIST=$(gh release view "$TAG" --json tagName,isPrerelease,isDraft,name 2>&1); then
+            echo "release $TAG already exists: $EXIST"
           else
+            echo "no release yet ($EXIST); creating"
             gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES"
-            echo "release $TAG created"
+            echo "created: $(gh release view "$TAG" --json tagName,isPrerelease,isDraft,name)"
           fi
-          gh release view "$TAG" --json tagName,isPrerelease,name > /dev/null
           gh release upload "$TAG" out/* --clobber
-          gh release view "$TAG" --json assets --jq '.assets | length' | sed 's/^/assets on the release: /'
+          echo "assets on the release: $(gh release view "$TAG" --json assets --jq '.assets | length')"
