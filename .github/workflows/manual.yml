@@ -52,6 +52,12 @@ jobs:
           tar -xJf typst.tar.xz
           echo "PANDOC=$RUNNER_TEMP/tools/pandoc-${PANDOC_VERSION}/bin/pandoc" >> "$GITHUB_ENV"
           echo "TYPST=$RUNNER_TEMP/tools/typst-x86_64-unknown-linux-musl/typst" >> "$GITHUB_ENV"
+          # A translated manual needs a face for its script: typst carries Latin ones only. One CJK face covers every
+          # language the site translates into, and build_manual.sh hands the directory to typst with --font-path
+          mkdir -p "$RUNNER_TEMP/fonts"
+          curl -fsSL -o "$RUNNER_TEMP/fonts/NotoSansSC.ttf" \
+            "https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf"
+          echo "RFOUNDRY_MANUAL_FONTS=$RUNNER_TEMP/fonts" >> "$GITHUB_ENV"
 
       - name: Build the PDF
         run: |

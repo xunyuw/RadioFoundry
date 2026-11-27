@@ -11,7 +11,11 @@
 #let horizontalrule = line(start: (25%, 0%), end: (75%, 0%), stroke: 0.5pt + luma(160))
 
 #set document(title: "$title$")
-#set text(lang: "en", region: "US", size: 10.5pt)
+// A translated manual needs a face for its script: typst carries Latin ones only, and build_manual.sh --lang passes a
+// directory of them with --font-path. The list is one fallback chain, so the Latin faces stay first and a Chinese
+// character is drawn by the face that has it.
+#set text(lang: "$lang$", region: "$region$", size: 10.5pt,
+  font: ("Libertinus Serif", "Noto Sans CJK SC", "Noto Sans SC", "DejaVu Sans"))
 #set par(justify: false, leading: 0.62em, spacing: 0.9em)
 #set page(
   paper: "us-letter",

@@ -73,8 +73,16 @@ fi
 
 DATE=$(date -u +%Y-%m-%d)
 TITLE="RadioFoundry User Manual"
-if [ "$LANG_CODE" = zh ]; then
-	TITLE="RadioFoundry 用户手册"
+MD_LANG="en"
+MD_REGION="US"
+if [ -n "$LANG_CODE" ]; then
+	MD_LANG=$LANG_CODE
+	case "$LANG_CODE" in
+	zh) TITLE="RadioFoundry 用户手册"; MD_REGION="CN" ;;
+	es) TITLE="Manual de usuario de RadioFoundry"; MD_REGION="ES" ;;
+	it) TITLE="Manuale utente di RadioFoundry"; MD_REGION="IT" ;;
+	fr) TITLE="Manuel d'utilisation de RadioFoundry"; MD_REGION="FR" ;;
+	esac
 fi
 # shellcheck disable=SC2086 # the chapter list is split on purpose
 (cd "$SRC_DIR" && RFOUNDRY_MANUAL_DIR="$SRC_DIR" RFOUNDRY_REPO_ROOT="$ROOT" "$PANDOC" \
@@ -85,6 +93,8 @@ fi
 	--toc --toc-depth=2 \
 	--metadata title="$TITLE" \
 	--metadata subtitle="Version $VERSION" \
+	--metadata lang="$MD_LANG" \
+	--metadata region="$MD_REGION" \
 	--metadata date="$DATE" \
 	--output="$TYP" \
 	$CHAPTERS)
@@ -93,5 +103,12 @@ echo "manual: $TYP"
 if [ "$TYP_ONLY" = 1 ]; then
 	exit 0
 fi
-"$TYPST" compile --root "$ROOT" "$TYP" "$OUT"
+# Typst carries Latin faces only. A translated manual needs a face for its script: RFOUNDRY_MANUAL_FONTS names a
+# directory of them (the manual workflow fetches one), and the template falls back to it through `fallback` below
+FONT_ARGS=""
+if [ -n "${RFOUNDRY_MANUAL_FONTS:-}" ] && [ -d "$RFOUNDRY_MANUAL_FONTS" ]; then
+	FONT_ARGS="--font-path $RFOUNDRY_MANUAL_FONTS"
+fi
+# shellcheck disable=SC2086 # one optional flag, split on purpose
+"$TYPST" compile --root "$ROOT" $FONT_ARGS "$TYP" "$OUT"
 echo "manual: $OUT"
