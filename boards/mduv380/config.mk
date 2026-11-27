@@ -12,15 +12,16 @@ CONFIG_DISPLAY_INSET_LEFT ?= 2
 # APRS receive takes the HR_C6000's FM receive audio from the I2S stream (docs/spec/aprs.md 5.3). The iGate (RF to
 # APRS-IS through tools/aprs_gate.py, 1.9 KB) is off by default
 CONFIG_APRS_IGATE ?= n
-MAXIMAL_VARS := LTO=1
+# The maximal configuration builds the hotspot rather than Voice FR, the two wanting the same RAM (below): a CONFIG_VARS
+# entry because VW is on by default, and MAXIMAL_SKIP alone stops only a switch the maximal build would turn on
+MAXIMAL_VARS := LTO=1 CONFIG_YSF_VW=n
 # Left out of tools/ci.sh's maximal configuration: PPP stands in for the USB network adapter on UART-only radios
 # (docs/spec/ppp.md), and this one has the adapter; the APRS iGate is off by default (above); French, off by default,
 # so that the maximal build keeps satellite tracking and still fits the app region; Chinese too, whose code point index
 # and pinyin search fill the app region beside every other switch (36 KB over). The `chinese` extra builds it instead,
 # without satellite tracking (board.toml). Only its bitmaps live in the data flash (below), not its index or text.
-# Voice FR too: its 4,288 B of RAM (below) don't fit beside everything else, and the hotspot is the other switch it
-# trades with, so the `chinese-c4fm` extra builds it on
-MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR LANG_ZH LANG_DEFAULT_ZH YSF_VW
+# Voice FR is left out by MAXIMAL_VARS above, so the maximal build has the hotspot
+MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR LANG_ZH LANG_DEFAULT_ZH
 
 # What the radio's hardware can't do, one switch per line with the reason (tools/boards.py checks there is one;
 # docs/build-config.md, "Unsupported, not written, unconfirmed"): ci's maximal configuration leaves these off
@@ -43,13 +44,20 @@ BOARD_UNSUPPORTED += FAULT_TRACE	# needs a host UART: the host port is USB, and 
 CONFIG_CJK_CELL ?= 12
 BOARD_NOT_WRITTEN += DSTAR	# GMSK, and this board has no flat FM transmit tap (docs/spec/dstar-modem.md 1.1)
 # Voice FR is not a flat-tap feature: it is a codec (core/mbe) on the same C4FM route DN takes, which this board runs.
-# It is written here and builds, so it is a choice and not a gap: what it costs is RAM. 4,288 B measured, against 1,900 B
-# this build has left (129,168 of 131,068), so it doesn't fit beside the hotspot. Turn the hotspot off and it does, with
-# 108 B free: that is the CI extra. A platform whose vocoder lends the codec's state block (HAL_VOCODER_LEND_BYTES)
-# spends a few hundred bytes instead (296 B where the vocoder lends); this one lends nothing, so radio_ysf_vw keeps its
-# 3,964 B here (radio_ysf.h RADIO_YSF_VW_IN_AREA)
-BOARD_DEFAULT_OFF += YSF_VW	# works, and needs 4,288 B of RAM: it fits with the hotspot turned off
-CONFIG_YSF_VW ?= n
+# It is on by default here. What it costs is RAM: 4,288 B measured, and this radio has room for exactly one of VW and the
+# hotspot, so the hotspot is the choice instead (below). A platform whose vocoder lends the codec's state block
+# (HAL_VOCODER_LEND_BYTES) spends a few hundred bytes instead (296 B where the vocoder lends); this one lends nothing, so
+# radio_ysf_vw keeps its 3,964 B here (radio_ysf.h RADIO_YSF_VW_IN_AREA). 130,960 B of 131,068 with VW on and the hotspot
+# off: 108 B free, which is why nothing else may be added to this build (measured 27 Nov 2026)
+CONFIG_YSF_VW ?= $(CONFIG_YSF)
+
+# The hotspot and Voice FR take the same RAM, and this board has them for one: its buffers are 2,496 B, VW's codec state
+# 4,288 B, and the build has 1,900 B left with neither. A handheld is more often on the air than acting as a modem, so
+# VW is the default and the hotspot is the choice: CONFIG_HOTSPOT=y CONFIG_YSF_VW=n builds the hotspot and leaves VW's
+# codec out. CI builds the default (VW on), the maximal configuration with the hotspot off (MAXIMAL_SKIP), and the
+# `chinese` extras
+CONFIG_HOTSPOT ?= n
+BOARD_DEFAULT_OFF += HOTSPOT	# works, and needs the 2,496 B of RAM this build gives to Voice FR
 
 # Fusion is on by default: this board reaches C4FM through its HR_C6000's FM copy, not the flat FM tap Fusion's first
 # route needs (docs/spec/ysf-modem.md 1.7), so CONFIG_YSF_AIR carries it. Checked both ways on air against a stock radio

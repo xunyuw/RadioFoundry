@@ -250,7 +250,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | `HOSTLINK` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `USB_NETWORK` | ✕ | ● | ✕ | ✕ | ● | ● | ● | ✕ |
 | `NET_PPP` | ● | ○ | ● | ● | ○ | ○ | ○ | ○ |
-| `HOTSPOT` | ● | ● | ● | ● | ● | ● | ● | ○ |
+| `HOTSPOT` | ● | ● | ● | ● | ● | ○ | ● | ○ |
 | `HOTSPOT_SPLIT` | ● | ● | ● | … | … | ○ | ● | … |
 | `DEBUGLINK` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `CPS_OPENFW` | ● | ● | ● | ● | ● | ● | ● | ● |
@@ -302,7 +302,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | `BCAST_FM` | ● | ✕ | ● | … | ✕ | ✕ | ✕ | ✕ |
 | `DSTAR` | ○ | … | … | … | … | … | … | … |
 | `YSF` | ○ | … | … | … | … | ● | … | … |
-| `YSF_VW` | ○ | … | … | … | … | ○ | … | … |
+| `YSF_VW` | ○ | … | … | … | … | ● | … | … |
 | `YSF_AIR` | ○ | ○ | ○ | ○ | ○ | ● | ○ | ○ |
 | `APRS` | ● | ● | ● | ● | ● | ● | ● | ● |
 | `APRS_AFSK` | ● | ● | ● | ● | ● | ● | ● | ● |
@@ -346,7 +346,7 @@ clock`; ? = not known yet). No driver reads the clock yet ([radio-features.md](s
 | NXDN Scrambler (15-bit) | `NXDN_SCRAMBLER` | 468 | — | Needs `NXDN`; supports conventional voice calls. The NXDN air interface must support the requested direction. Checked on air against another radio running RadioFoundry and a commercial portable ([bring-up record](testing/dm32-bringup.md#nxdn-scrambler-interoperability)). |
 | D-STAR digital voice: GMSK modem, headers, slow data, clean-room AMBE codec | `DSTAR` | — | — | DM-32UV only (flat FM path); on in the multimode variant. Ported, not yet checked on a radio in this tree ([dstar-modem.md](spec/dstar-modem.md), [dstar-codec.md](spec/dstar-codec.md)). The codec borrows the DMR vocoder's RAM |
 | Yaesu System Fusion (C4FM): FICH, callsign data, DN voice with the radio's own codec | `YSF` | — | — | On by default where the board reaches C4FM: DM-32UV through the flat FM path (multimode variant), the HR_C6000 radios through the chip's FM copy (`YSF_AIR`). Checked both ways on air on the MD-UV380 against a stock radio ([ysf-modem.md](spec/ysf-modem.md), [ysf-bench.md](testing/ysf-bench.md)) |
-| Fusion Voice FR (VW): the full-rate frame and layout, played and sent through core/mbe's codec | `YSF_VW` | — | — | With `YSF`. Where the platform's vocoder lends nothing (`HAL_VOCODER_LEND_BYTES` unset) the codec's state is the mode area's own 3,964 B (`radio_ysf_vw_mem_t`), which is what decides a narrow-RAM board: the MD-380 and the MD-UV380 spend 4,288 B all told. A platform that lends spends a few hundred instead (296 B on the DM-32UV). It is written and builds on both, but does not fit beside the hotspot, so the MD-UV380 lists it in `BOARD_DEFAULT_OFF` (a choice; `CONFIG_HOTSPOT=n` leaves 108 B free and its CI extra builds it) and the MD-380 in `BOARD_NOT_WRITTEN` (its Fusion needs an FM receive tap it doesn't have). Ported, not yet checked on a radio in this tree ([ysf-modem.md](spec/ysf-modem.md) 4.1) |
+| Fusion Voice FR (VW): the full-rate frame and layout, played and sent through core/mbe's codec | `YSF_VW` | — | — | With `YSF`. Where the platform's vocoder lends nothing (`HAL_VOCODER_LEND_BYTES` unset) the codec's state is the mode area's own 3,964 B (`radio_ysf_vw_mem_t`), which is what decides a narrow-RAM board: on the MD-UV380 it costs 4,288 B and the hotspot's buffers 2,496 B, and the build has room for one, so VW is on by default there and the hotspot is the `BOARD_DEFAULT_OFF` choice (`CONFIG_HOTSPOT=y CONFIG_YSF_VW=n`). A platform that lends spends a few hundred instead (296 B on the DM-32UV). The MD-380 lists it in `BOARD_NOT_WRITTEN`: its Fusion needs an FM receive tap that chip doesn't have. Ported, not yet checked on a radio in this tree ([ysf-modem.md](spec/ysf-modem.md) 4.1) |
 | Fusion through a modem chip's air interface: the board's FM copy into the core's soft modem, for a radio with no flat FM tap | `YSF_AIR` | — | — | With `YSF`, on a board whose `hal_air` provider carries the profile both ways. Written for the HR_C6000 radios; checked both ways on air on the MD-UV380 against a stock radio ([ysf-modem.md](spec/ysf-modem.md) 1.7) |
 | Basic privacy (Motorola / Anytone BP) | `DMR_PRIVACY` | 1,936 | 1,992 |  |
 | AES-256 DMR voice, PI header and late-entry signaling | `DMR_AES` | 3,992 | — | Requires `DMR_PRIVACY`. DM-1701: 3,992 B flash and 480 B RAM with `DMR_AES` on versus off. TX to a receiver of another make needs the modem driver's burst F field (`set_burst_f`, [dmr-voice.md](spec/dmr-voice.md) 5.1): only the HR_C7000 driver has it (DM-32UV); on the HR_C6000 and other radios our AES overs reach radios running RadioFoundry only (#864). |

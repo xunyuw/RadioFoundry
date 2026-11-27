@@ -376,6 +376,21 @@ Follow [Installing](02-installing.md) with these values.
 No **P1**, **P2**, **SK3** or top key, so no **Power level** or zone keys and no emergency key. Change the zone with
 **OK**, **4**, the power with **\***, **1**.
 
+### MD-UV380: Fusion's Voice FR, or the hotspot
+
+This radio's build has room for one of the two. Yaesu System Fusion is on, and so is its **Voice FR** (VW) mode; the
+MMDVM **hotspot** is off. Both want the same working memory, and the build has 1,900 B left with neither: VW's codec
+state is 4,288 B, the hotspot's buffers 2,496 B.
+
+To have the hotspot instead, build or get an image with the two switched:
+
+```
+make BOARD=mduv380 CONFIG_HOTSPOT=y CONFIG_YSF_VW=n
+```
+
+The hotspot joins the radio to a computer as a modem; VW plays and sends Fusion's full-rate voice. C4FM itself, DN
+voice included, works either way.
+
 ### MD-UV380 power levels
 
 Nine levels: 50 mW, 250 mW, 500 mW, 750 mW, 1 W, 2 W, 3 W, 4 W, 5 W. On the MD-UV390 Plus 10 W image the top four are

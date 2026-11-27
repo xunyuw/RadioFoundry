@@ -49,19 +49,14 @@ values = [
 
 # The Chinese image: the 12 px cell keeps the 160 px layout as it is in English, and the face and the pinyin tables
 # live in the data flash (boards/mduv380/config.mk, docs/spec/ui.md 2.5). Satellite tracking has to go: its tables are
-# in the app region, and Chinese needs that room for the code point index and the search
+# in the app region, and Chinese needs that room for the code point index and the search. C4FM goes along, on by
+# default (ysf-modem.md 1.7), Fusion's Voice FR among it: 702,908 B of the 720 KB region and 129,952 B of RAM
+# (measured 27 Nov 2026). One extra covers Chinese: VW and the hotspot are the same RAM (config.mk), so the build that
+# has Chinese also has C4FM and VW, and a second configuration would be this one again
 [ci]
 extra = [
 	{ name = "chinese", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
 	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n", "LTO=1"] },
-	# Chinese and C4FM together, Fusion's Voice FR (VW) among it: 702,908 B of the 720 KB region and 129,952 B of RAM
-	# (measured 27 Nov 2026). This is the build that covers YSF_VW, which the maximal configuration leaves out: VW's
-	# 4,288 B of RAM don't fit beside everything it turns on. The hotspot goes because its buffers are the RAM this
-	# radio has none of. C4FM here is the HR_C6000's FM copy into the core's soft modem (ysf-modem.md 1.7), not the
-	# flat paths
-	{ name = "chinese-c4fm", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
-	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n",
-	  "CONFIG_YSF=y", "CONFIG_YSF_AIR=y", "CONFIG_YSF_VW=y", "CONFIG_HOTSPOT=n", "LTO=1"] },
 ]
 
 [flash]
