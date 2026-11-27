@@ -37,6 +37,13 @@ local function repo_path(rel)
 	return normalize(manual_dir .. "/" .. rel)
 end
 
+-- A chapter's images are the same files whichever language the chapter is in: the screenshots live in docs/ux/screens
+-- and a translation points at them with the same ../ path, so they resolve from docs/user, not from the translated
+-- tree (docs/i18n/<code>/user/../ux would be docs/i18n/<code>/ux, which does not exist)
+local function image_path(rel)
+	return normalize("docs/user/" .. rel)
+end
+
 local function attr_of(tag, name)
 	return tag:match(name .. '%s*=%s*"([^"]*)"') or tag:match(name .. "%s*=%s*'([^']*)'")
 end
@@ -54,7 +61,7 @@ local function img_from_html(tag)
 	end
 	local path = src
 	if not src:match("^%a+://") then
-		path = "/" .. repo_path(src)
+		path = "/" .. image_path(src)
 		-- A screenshot that isn't rendered yet must not break the build: leave it out and say so
 		if repo_root ~= nil then
 			local f = io.open(repo_root .. path, "rb")
@@ -156,7 +163,7 @@ end
 -- Markdown images (if any) get the same root-relative paths
 local function image(el)
 	if not el.src:match("^%a+://") and el.src:sub(1, 1) ~= "/" then
-		el.src = "/" .. repo_path(el.src)
+		el.src = "/" .. image_path(el.src)
 	end
 	return el
 end
