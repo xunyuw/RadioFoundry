@@ -118,7 +118,12 @@ def gb2312_level1():
 
 def gb2312_all():
     """Every character GB2312 codes (7445: the 3755 of level 1, 3008 of level 2 and the symbol rows): the whole set a
-    Chinese codeplug or a user's own name can hold, drawn so no channel name meets a box."""
+    Chinese codeplug or a user's own name can hold, drawn so no channel name meets a box.
+
+    The catalog's own characters are added too. A Chinese build draws every non-ASCII character of a msgstr from this
+    table, and the interface uses a few marks GB2312 does not code (the arrows in the import and export rows): without
+    them those rows show a box in a Chinese build while the English one draws them from its Latin font.
+    """
     chars = set()
     for hb in range(0xA1, 0xFF):
         for lb in range(0xA1, 0xFF):
@@ -259,6 +264,11 @@ def main():
         chars |= gb2312_level1()
     if args.gb2312:
         chars |= gb2312_all()
+        # The whole-GB2312 set is what a Chinese build draws *every* non-ASCII character from, so the marks that a
+        # catalog leaves to the Latin font (MACRO_CHARS: the arrows in the import and export rows) need a glyph here
+        # too. GB2312 does not code them, and the Latin face these builds use stops at U+0084, so without this the
+        # rows draw a box in Chinese while English draws the mark.
+        chars |= set(MACRO_CHARS)
     chars = sorted(ch for ch in chars if codepoint_ok(ord(ch)) and not ch.isspace())
     if not chars:
         ap.error("no characters to build")

@@ -8,7 +8,13 @@ has to do them in one order: the firmware image, the two blobs, and the tool tha
 zip holding them, a README that says the order, and a checksum file:
 
   tools/zh_pack.py --board <radio> --version v26.11 --out dist \
-      --font build/cjk.bin --pinyin build/pinyin.bin
+      --font build/cjk.bin --pinyin build/pinyin.bin --face fusion-pixel-12px-proportional-zh_hans.ms.bitmap.ttf
+
+--face adds the font the bitmaps were rasterized from. Nothing in the flashing path needs it: the bitmaps are already
+rendered, so the radio and rfoundry work from them alone. It is there so a user can re-render the table with their own
+character list (tools/cjkfont.py --font ... --chars-file ...) without hunting for a face of the same version, which is
+what draws the marks and names GB2312 does not code. The face is SIL Open Font License 1.1: the pack carries OFL-1.1
+and the face's own notice, which is what that license asks of anyone redistributing it.
 
 The images come from tools/release.py's output (dist/rfoundry-<board>[-<option>]-<version>.json); the blobs are what
 tools/cjkfont.py --out-bin and tools/pinyin_table.py --out-bin wrote. Both blobs must carry their .json: it is what
@@ -59,6 +65,8 @@ What is in this folder
   data/{font_name}.json   which glyph table the bitmaps are (rfoundry compares it with the firmware)
   data/{pinyin_name}      the pinyin tables, {pinyin_bytes} bytes, for typing Chinese on the keypad
 {tool_list}  SHA256SUMS              every file above, for checking a download that went wrong
+{face_list}
+Nothing above but SHA256SUMS is optional: every file it lists goes on the radio in the order below.
 
 Why three files
 ---------------
@@ -154,6 +162,8 @@ def main(argv=None):
     ap.add_argument("--font", required=True, help="the glyph bitmaps (tools/cjkfont.py --out-bin); its .json beside it")
     ap.add_argument("--pinyin", required=True, help="the pinyin tables (tools/pinyin_table.py --out-bin)")
     ap.add_argument("--tools", help="a directory of rfoundry executables to include (rfoundry-*-<os>-<arch>[*])")
+    ap.add_argument("--face", help="the font the bitmaps were rasterized from (OFL-1.1), so the tables can be "
+                                   "re-rendered with another character list; optional, nothing needs it to flash")
     ap.add_argument("--out", default="dist", help="where to write the zip (default: dist)")
     args = ap.parse_args(argv)
 
@@ -207,13 +217,18 @@ def main(argv=None):
         tool_list = "\n".join("  %s" % os.path.basename(t) for t in tools) + "\n"
     else:
         tool_list = ("  (no rfoundry executable in this pack: use the one from the release page)\n")
+    if args.face:
+        face_list = ("  font/%s\n      the face the glyphs were rendered from (OFL-1.1), for rendering the table\n"
+                     "      again with characters of your own; nothing needs it to flash\n" % os.path.basename(args.face))
+    else:
+        face_list = ""
     readme = README.format(
         version=args.version, board_name=board_name, board_id=args.board,
         image=image, manifest=os.path.basename(default[2]),
         font_name=os.path.basename(args.font), pinyin_name=os.path.basename(args.pinyin),
         font_bytes=fm.get("bytes", os.path.getsize(args.font)),
         pinyin_bytes=os.path.getsize(args.pinyin),
-        firmware_list=firmware_list, tool_list=tool_list,
+        firmware_list=firmware_list, tool_list=tool_list, face_list=face_list,
         unofficial=unofficial)
 
     written = []
@@ -230,6 +245,10 @@ def main(argv=None):
         add("data/" + os.path.basename(args.font), args.font)
         add("data/" + os.path.basename(font_meta), font_meta)
         add("data/" + os.path.basename(args.pinyin), args.pinyin)
+        # The face is optional and nothing in the flashing path reads it; it is here so the tables can be re-rendered
+        # with a character list of the user's own, which is the only reason to want it
+        if args.face:
+            add("font/" + os.path.basename(args.face), args.face)
         for t in tools:
             add(os.path.basename(t), t)
         # the OFL the glyph bitmaps are under: the face is not redistributed, the bitmaps it made are

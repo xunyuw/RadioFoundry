@@ -63,6 +63,28 @@ On Windows the radio's bootloader needs a driver the first time: see
 5. **Type a Chinese name.** In a name field, each number key is the letters on it (2 = abc, 3 = def …). The bar above
    shows the readings of the digits typed so far; the arrow keys walk them and OK takes one.
 
+## Characters the bitmaps do not carry
+
+The pack's bitmaps cover every character GB2312 codes (7447 with the interface's own marks). A name that uses a
+character outside that set — a rare ideograph, traditional characters, an emoji — draws a box. Nothing is broken; the
+radio has no glyph for it.
+
+To add one, render the table again with the characters you need and write it with the same command as step 3. The pack
+carries the face the bitmaps came from in `font/`, and `tools/cjkfont.py` (from the project's repository) takes a list
+of characters to include:
+
+```
+python3 tools/cjkfont.py --font font/<the face>.ttf --cell 12 --supersample 1 --gb2312 \
+    --chars-file my-names.txt \
+    --font-name "<the face and its version>" --copyright "<from the face>" \
+    --license OFL-1.1 --spdx OFL-1.1 --out-c /tmp/font.c --out-bin my-font.bin
+```
+
+`my-names.txt` holds one name (or one character) per line. The command then needs the firmware rebuilt with the table
+it wrote, which is why the project builds one image per font: changing what the table holds changes the index the
+radio looks characters up with, and the `.json` beside `my-font.bin` is what rfoundry compares. In short: this is a
+build, not a setting. Ask whoever published the pack to add the characters you need.
+
 ## When something goes wrong
 
 | The command says | What it means |
