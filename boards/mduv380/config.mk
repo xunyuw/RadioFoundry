@@ -39,6 +39,14 @@ BOARD_UNSUPPORTED += FAULT_TRACE	# needs a host UART: the host port is USB, and 
 # them in the data flash at 0xF40000 and 0xF6C000 (below) and `rfoundry font` writes them there. Off by default like
 # Chinese on every radio: the `chinese` CI extra builds it, and a radio without the blob burned in draws boxes
 CONFIG_CJK_CELL ?= 12
-BOARD_NOT_WRITTEN += DSTAR	# no flat FM paths in board.audio_tap (docs/spec/dstar-modem.md 1.1)
-BOARD_NOT_WRITTEN += YSF	# the same flat FM paths Fusion runs on (docs/spec/ysf-modem.md 1.1)
-BOARD_NOT_WRITTEN += YSF_VW	# Voice FR rides on Fusion, not written here either
+BOARD_NOT_WRITTEN += DSTAR	# GMSK, and this board has no flat FM transmit tap (docs/spec/dstar-modem.md 1.1)
+BOARD_NOT_WRITTEN += YSF_VW	# Voice FR needs the flat tap's full-rate voice; not written here either
+
+# Fusion is on by default: this board reaches C4FM through its HR_C6000's FM copy, not the flat FM tap Fusion's first
+# route needs (docs/spec/ysf-modem.md 1.7), so CONFIG_YSF_AIR carries it. Checked both ways on air against a stock radio
+# (docs/testing/ysf-bench.md). It costs 2.5 KB of RAM this radio does not have to spare, and the split duplex repeater
+# the hotspot can run is what goes: that needs two radios and is the one hotspot feature this board loses. 705,264 B of
+# the 720 KB region and 129,168 B of RAM (measured 27 Nov 2026)
+CONFIG_YSF ?= y
+CONFIG_YSF_AIR ?= $(CONFIG_YSF)
+CONFIG_HOTSPOT_SPLIT ?= n

@@ -16,7 +16,7 @@
 
 ## 按键参考
 
-按键以其功能命名（[约定](01-introduction.md#conventions-in-this-manual)）。[按键角色](23-radios.md#按键角色)列出你的电台上哪个物理键承担哪项功能，也列出电台没有某个键时的替代方式。
+按键以其功能命名（[约定](01-introduction.md#conventions-in-this-manual)）。[按键角色](23-radios.md#key-roles)列出你的电台上哪个物理键承担哪项功能，也列出电台没有某个键时的替代方式。
 
 | 按键 | 短按 | 长按 |
 |---|---|---|
