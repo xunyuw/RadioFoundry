@@ -129,6 +129,74 @@ This is {version}{unofficial}
 UNOFFICIAL = (", an unofficial build of RadioFoundry, not supported by the RadioFoundry project: ask whoever\n"
               "published this pack. The project's own releases are at https://github.com/RadioFoundry/RadioFoundry.")
 
+# The same walkthrough in Chinese, as its own file: a reader who needs the Chinese build reads Chinese first, and the
+# English README's job is then only the file list. Kept in step with README above.
+README_ZH = """\
+RadioFoundry {version} - {board_name} 中文固件包
+
+这个包里有让 {board_name} 显示和输入中文所需的全部内容。开始前请先看完这份说明：下面的顺序很重要。
+
+包内文件
+--------
+{firmware_list}
+  data/cjk.bin        字形位图，{font_bytes} 字节，GB2312 编码的全部汉字
+  data/cjk.bin.json   这份位图对应哪套字表（rfoundry 会拿它和固件比对）
+  data/pinyin.bin     拼音表，{pinyin_bytes} 字节，用于用键盘输入中文
+{tool_list}
+  SHA256SUMS          以上所有文件的校验和，用于检查下载是否完整
+{face_list}
+为什么是三样
+------------
+固件把中文字形和拼音表放在电台的数据 flash 里，不放在镜像里：那块 flash 放得下 180 KB 字形，而 720 KB 的应用区
+在装完其余固件后放不下。所以只刷镜像的话，电台会在本该显示中文的地方画方框。
+
+rfoundry 会写入这三样，并在写之前互相校验：字库里记着字符数和字形索引的哈希，固件会报告它查字用的索引。来自其他
+构建的字库会在写入之前被拒绝。
+
+需要什么
+--------
+  - 电台，{board_name}
+  - 一根能传数据的 USB 线（只能充电的线不行）
+  - Windows 10/11、Linux 或 macOS
+  - 不需要原厂固件文件：本包会保留电台里已有的 codec
+
+Windows 上第一次使用需要给 bootloader 装驱动，见项目网站「安装」页。
+
+操作顺序（不要跳过任何一步）
+--------------------------
+1. 把本包解压到一个找得到的位置，保持目录结构不变。
+
+2. 让电台进入 bootloader：先关机，然后在开机的同时按住 {board_name} 用于进入 bootloader 的两个键（多数 TYT /
+   宝锋电台是 PTT 上方那两个侧键，具体见电台说明书）。屏幕保持黑屏，电脑上会出现一个 USB 设备。
+
+3. 在本文件夹里打开终端，按下面的顺序执行（本包里已带工具，不用另外下载）：
+
+     Windows:   rfoundry-v26.11-bi4aoq-windows-x86_64.exe prepare firmware\\{image} ^
+                    --font data\\cjk.bin --pinyin data\\pinyin.bin --board {board_id}
+     Linux:     ./rfoundry-v26.11-bi4aoq-linux-x86_64 prepare firmware/{image} \\
+                    --font data/cjk.bin --pinyin data/pinyin.bin --board {board_id}
+     macOS:     ./rfoundry-v26.11-bi4aoq-macos-x86_64 prepare firmware/{image} \\
+                    --font data/cjk.bin --pinyin data/pinyin.bin --board {board_id}
+
+   一条命令做完全部：先校验字库与固件是否匹配（不匹配会拒绝，一个字都不会写），再刷入镜像、写入两个数据行、逐项
+   读回校验。成功时最后一行是 the radio draws Chinese。请读它的输出，不要在第一次停顿时就关掉电台。
+
+4. 开机。电台会以中文启动。如果没有，进入 设置 > 显示 > 语言，选择「中文」。
+
+5. 输入中文名字：在名字输入框里，每个数字键是对应的一组字母（2 = abc，3 = def……），上方横条显示已输入数字对应
+   的读音，方向键切换，OK 选定。
+
+出问题时
+--------
+  - the radio did not report its glyph table：电台运行的不是本包的固件。第 3 步会刷入它，刷完再执行一次。
+  - was built for N characters and ... for M：字库和镜像是不同构建的。不要混用两个包里的文件，用同一个 zip。
+  - 屏幕显示方框：固件不是这个，或数据没写进去。重做第 3 步并读输出。
+  - DMR 语音失效：电台的 codec 不在本包预期的位置。用原厂固件文件重新刷：
+    rfoundry flash --stock 原厂固件文件 ...（项目网站「安装」页有完整说明）。
+
+这是 {version}{unofficial}
+"""
+
 
 def sha256(path):
     h = hashlib.sha256()
@@ -204,15 +272,20 @@ def main(argv=None):
     plain = "rfoundry-%s-%s.bin" % (args.board, args.version)
     default = next((x for x in images if os.path.basename(x[1]) == plain), images[0])
     image = os.path.basename(default[1])
-    lines = []
+    lines, lines_zh = [], []
     for m, img, man in images:
         tag = "" if (m, img, man) == default else " (%s build)" % os.path.basename(img).split("-%s" % args.version)[0] \
             .replace("rfoundry-%s-" % args.board, "").upper()
+        tag_zh = "" if (m, img, man) == default else "（%s 版本）" % os.path.basename(img).split("-%s" % args.version)[0] \
+            .replace("rfoundry-%s-" % args.board, "").upper()
         lines.append("  firmware/%s%s" % (os.path.basename(img), tag))
+        lines_zh.append("  firmware/%s%s" % (os.path.basename(img), tag_zh))
         if (m, img, man) == default:
             lines.append("  firmware/%s     its manifest, which rfoundry checks the image against"
                          % os.path.basename(man))
+            lines_zh.append("  firmware/%s     它的清单，rfoundry 用它校验镜像" % os.path.basename(man))
     firmware_list = "\n".join(lines)
+    firmware_list_zh = "\n".join(lines_zh)
     if tools:
         tool_list = "\n".join("  %s" % os.path.basename(t) for t in tools) + "\n"
     else:
@@ -230,6 +303,20 @@ def main(argv=None):
         pinyin_bytes=os.path.getsize(args.pinyin),
         firmware_list=firmware_list, tool_list=tool_list, face_list=face_list,
         unofficial=unofficial)
+    # the Chinese copy of the same thing, its file list in the same words
+    zh_face = ""
+    if args.face:
+        zh_face = ("  font/%s\n      位图所用的源字体（OFL-1.1），用于按你需要的字重新渲染字表；刷机不需要它\n"
+                   % os.path.basename(args.face))
+    readme_zh = README_ZH.format(
+        version=args.version, board_name=board_name, board_id=args.board,
+        image=image, manifest=os.path.basename(default[2]),
+        font_name=os.path.basename(args.font), pinyin_name=os.path.basename(args.pinyin),
+        font_bytes=fm.get("bytes", os.path.getsize(args.font)),
+        pinyin_bytes=os.path.getsize(args.pinyin),
+        firmware_list=firmware_list_zh, tool_list=tool_list, face_list=zh_face,
+        unofficial=(", 一个非官方构建，RadioFoundry 项目不为其提供支持：请询问发布这个包的人。项目的官方版本见\n"
+                    "https://github.com/RadioFoundry/RadioFoundry。" if unofficial else ""))
 
     written = []
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -239,6 +326,8 @@ def main(argv=None):
 
         # README first: it is what a user reads before doing anything, and the order it gives is the whole point
         z.writestr("README.txt", readme)
+        # the same walkthrough in Chinese, as its own file a reader opens first
+        z.writestr("安装说明.txt", readme_zh)
         for m, img, man in images:
             add("firmware/" + os.path.basename(img), img)
             add("firmware/" + os.path.basename(man), man)
