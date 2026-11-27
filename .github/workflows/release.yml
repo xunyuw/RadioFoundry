@@ -269,10 +269,11 @@ jobs:
         run: |
           set -eu
           TAG="${GITHUB_REF_NAME}"
-          NOTES="Firmware images for the radios listed below, without the AMBE codec, and rfoundry for Linux, macOS and
-          Windows. Flash with: rfoundry flash --release ${TAG}. rfoundry keeps the codec already in your radio when
-          that is known to be safe, or writes it from your radio's stock firmware file (--stock). See
-          docs/user/02-installing.md."
+          # One line, joined by printf: a multi-line YAML scalar keeps its indentation, which then lands in the notes
+          NOTES=$(printf '%s %s %s' "Firmware images for the radios listed below, without the AMBE codec, and" \
+            "rfoundry for Linux, macOS and Windows. Flash with: rfoundry flash --release ${TAG}." \
+            "rfoundry keeps the codec already in your radio when that is known to be safe, or writes it from your" \
+            "radio's stock firmware file (--stock). See docs/user/02-installing.md.")
           TITLE="RadioFoundry $TAG"
           # a fork's name (vYY.M-NNNAME) is not this project's release: say so in the title and the notes, and mark it
           # a pre-release even when its GitHub flag was missed, so no listing shows it as ours
@@ -283,10 +284,14 @@ jobs:
           else
             PRE=--prerelease
             TITLE="$TAG (unofficial build)"
-            NOTES="**This is not an official RadioFoundry release.** It was built from a modified tree, and the
-            RadioFoundry project does not support it: ask whoever published it. $NOTES"
+            NOTES=$(printf '%s\n\n%s' "**This is not an official RadioFoundry release.** It was built from a modified tree, and the RadioFoundry project does not support it: ask whoever published it." "$NOTES")
           fi
-          gh release view "$TAG" > /dev/null 2>&1 || \
-            gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES" || \
-            gh release view "$TAG" > /dev/null   # created meanwhile by the manual workflow
+          # Create it, or find the one the manual workflow made. Written so a failure to create is reported: the old
+          # view || create || view chain swallowed the error and the job still passed with no release
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG already exists"
+          else
+            gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES"
+            echo "release $TAG created"
+          fi
           gh release upload "$TAG" out/* --clobber
