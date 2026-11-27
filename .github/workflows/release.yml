@@ -51,9 +51,17 @@ jobs:
           sparse-checkout: tools/release_version.py   # the tag's check
           sparse-checkout-cone-mode: false
       - id: v
+        env:
+          RFOUNDRY_NO_MACOS_ARM64: ${{ vars.RFOUNDRY_NO_MACOS_ARM64 }}
         run: |
-          # rfoundry's runners: GitHub's Linux, macOS and Windows runners
-          m='[{"os":"ubuntu-22.04","name":"linux-x86_64"},{"os":"macos-15","name":"macos-arm64"},'
+          # rfoundry's runners: GitHub's Linux, macOS and Windows runners. A fork whose macOS-arm64 job the service
+          # cancels before it starts (the macOS minutes a private repository is given run out first, and a cancelled
+          # matrix entry fails the whole run, so nothing is published) sets the repository variable
+          # RFOUNDRY_NO_MACOS_ARM64=1: that one build is left out and the rest of the release still ships
+          m='[{"os":"ubuntu-22.04","name":"linux-x86_64"},'
+          if [ "${RFOUNDRY_NO_MACOS_ARM64:-}" != 1 ]; then
+            m="$m"'{"os":"macos-15","name":"macos-arm64"},'
+          fi
           m="$m"'{"os":"macos-15-intel","name":"macos-x86_64"},{"os":"windows-2022","name":"windows-x86_64","ext":".exe"}]'
           echo "rfoundry=$m" >> "$GITHUB_OUTPUT"
           if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME#v}" != "${GITHUB_REF_NAME}" ]; then
@@ -141,6 +149,39 @@ jobs:
           fi
           [ "$rc" != 3 ] || echo "::error::no $TOOLCHAIN compiler: the image ${RFOUNDRY_CSKY_IMAGE:-} isn't available on this runner (docs/dev/ci.md)"
           exit "$rc"
+
+      # A Chinese image keeps its glyphs and pinyin in the data flash, so a user needs the image and both blobs written
+      # in one order: tools/zh_pack.py puts them in one zip with a README that gives that order. The blobs are not
+      # built here: they come from a font face this repository does not carry (docs/dev/translating.md), so whoever
+      # publishes a Chinese build runs tools/zh_pack.py and uploads the zip beside the images. This step only makes
+      # sure a pack that was uploaded is well formed, so a broken one is caught before it is attached
+      - name: Check the Chinese packs, when this run was given any
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -eu
+          for z in dist/*-zh.zip; do
+            [ -f "$z" ] || continue
+            python3 - "$z" <<'EOF'
+          import sys, zipfile
+          z = zipfile.ZipFile(sys.argv[1])
+          names = z.namelist()
+          need = ["README.txt", "SHA256SUMS", "data/cjk.bin", "data/cjk.bin.json", "data/pinyin.bin"]
+          want = [n for n in need if n not in names]
+          if want:
+              sys.exit("%s is missing %s" % (sys.argv[1], ", ".join(want)))
+          if not any(n.startswith("firmware/") and n.endswith(".bin") for n in names):
+              sys.exit("%s carries no firmware image" % sys.argv[1])
+          print("zh pack ok:", sys.argv[1])
+          EOF
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        if: hashFiles('dist/*') != ''
+        with:
+          name: firmware-${{ matrix.toolchain }}
+          path: dist/
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         if: hashFiles('dist/*') != ''
@@ -239,10 +280,20 @@ jobs:
           Windows. Flash with: rfoundry flash --release ${TAG}. rfoundry keeps the codec already in your radio when
           that is known to be safe, or writes it from your radio's stock firmware file (--stock). See
           docs/user/02-installing.md."
-          # a beta tag (bN) is a pre-release: the site's default install (the latest release) skips it
+          TITLE="RadioFoundry $TAG"
+          # a fork's name (vYY.M-NNNAME) is not this project's release: say so in the title and the notes, and mark it
+          # a pre-release even when its GitHub flag was missed, so no listing shows it as ours
           PRE=""
           if python3 tools/release_version.py prerelease "$TAG"; then PRE=--prerelease; fi
+          if python3 tools/release_version.py own "$TAG"; then
+            :
+          else
+            PRE=--prerelease
+            TITLE="$TAG (unofficial build)"
+            NOTES="**This is not an official RadioFoundry release.** It was built from a modified tree, and the
+            RadioFoundry project does not support it: ask whoever published it. $NOTES"
+          fi
           gh release view "$TAG" > /dev/null 2>&1 || \
-            gh release create "$TAG" --verify-tag $PRE --generate-notes --title "RadioFoundry $TAG" --notes "$NOTES" || \
+            gh release create "$TAG" --verify-tag $PRE --generate-notes --title "$TITLE" --notes "$NOTES" || \
             gh release view "$TAG" > /dev/null   # created meanwhile by the manual workflow
           gh release upload "$TAG" out/* --clobber

@@ -34,10 +34,12 @@ for attempt in range(4):
 			raise
 		print("GitHub API %d, retrying" % e.code)
 		time.sleep(10 * (attempt + 1))
-# by release name (tools/release_version.py), never drafts; a tag that isn't a release name is not offered
+# by release name (tools/release_version.py), never drafts; a tag that isn't a release name is not offered. A fork's
+# name (v26.11-bi4aoq) is never this project's stable release, whatever its GitHub prerelease flag says: it is offered
+# the way a beta is, as an opt-in version link, so the default download stays ours
 named = {r["tag_name"]: r for r in rels if not r.get("draft") and rv.parse(r["tag_name"]) is not None}
-stable = rv.newest([t for t, r in named.items() if not r.get("prerelease")])
-beta = rv.newest([t for t, r in named.items() if r.get("prerelease")])
+stable = rv.newest([t for t, r in named.items() if not r.get("prerelease")], own_only=True)
+beta = rv.newest([t for t in named if t != stable and (named[t].get("prerelease") or rv.is_fork(t))])
 if beta and stable and rv.parse(beta) < rv.parse(stable):
 	beta = None
 with open(sys.argv[2], "w") as f:
