@@ -42,6 +42,13 @@ The site is static files on Cloudflare Pages, project `radiofoundry`, connected 
 Cloudflare's GitHub app. Pages builds in its own build image (Python and Node.js preinstalled) and switches the site to
 a new deployment in one step, so a deployment has no downtime.
 
+A fork that publishes its own builds runs its own Pages project the same way. `site/cloudflare-build.sh` reads the
+releases of the repository the checkout came from (`git remote get-url origin`, or `RFOUNDRY_RELEASE_REPO` as
+`owner/name`), so a fork's page offers that fork's images rather than the upstream's: upstream firmware on a fork's
+page would put a build on a visitor's radio that the page's docs do not describe. Only a fork's own unsuffixed name
+(`v26.11`) becomes its default install; its suffixed builds (`v26.11-bi4aoq`) go where a beta goes, the opt-in version
+link.
+
 | Part | Setup |
 |---|---|
 | Build | Command `site/cloudflare-build.sh`, output directory `build/site`, root directory the repository root. The script installs `site/requirements.txt`, lists the releases through the GitHub API, fetches the `rfoundry-*` images of the newest one that is not a pre-release, passes the newest pre-release (a `bN` tag) when it is newer than that (`--beta`), and runs `site/build.py --strict`. A failed build leaves the last deployment up |

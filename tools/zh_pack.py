@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 The RadioFoundry Authors
-"""Pack a Chinese build for people who do not build firmware (docs/user/zh-install.md).
+"""Pack a Chinese build for people who do not build firmware (docs/user/02b-chinese-pack.md).
 
 A Chinese image keeps its glyph bitmaps and pinyin tables in the radio's data flash, so a user needs three things and
 has to do them in one order: the firmware image, the two blobs, and the tool that writes all three. This writes one
 zip holding them, a README that says the order, and a checksum file:
 
-  tools/zh_pack.py --board mduv380 --version v26.11-bi4aoq --out dist \
+  tools/zh_pack.py --board <radio> --version v26.11 --out dist \
       --font build/cjk.bin --pinyin build/pinyin.bin
 
 The images come from tools/release.py's output (dist/rfoundry-<board>[-<option>]-<version>.json); the blobs are what
@@ -45,7 +45,7 @@ def is_fork(tag):
     return release_version.is_fork(tag)
 
 # What a Chinese image needs on the radio, and what a user must be told, in the order they do it. The page name is
-# what the zip's README points at on the site; the site's own copy of this text is docs/user/zh-install.md.
+# what the zip's README points at on the site; the site's own copy of this text is docs/user/02b-chinese-pack.md.
 README = """\
 RadioFoundry {version} - {board_name}, with Chinese
 
@@ -180,8 +180,8 @@ def main(argv=None):
               file=sys.stderr)
 
     os.makedirs(args.out, exist_ok=True)
-    # A fork's name (v26.11-bi4aoq) says so in the file name too: a zip called rfoundry-mduv380-v26.11-zh.zip next to
-    # the project's own v26.11 is one a user takes for ours
+    # A fork's name (v26.11-bi4aoq) says so in the file name too: a zip whose name reads like the project's own
+    # release is one a user takes for ours
     unofficial_name = "-unofficial" if is_fork(args.version) else ""
     name = "rfoundry-%s-%s-zh%s" % (args.board, args.version, unofficial_name)
     zip_path = os.path.join(args.out, name + ".zip")

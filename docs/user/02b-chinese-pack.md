@@ -7,7 +7,7 @@ A radio that shows Chinese needs three things written to it, in one order: the f
 the pinyin tables. A *Chinese pack* holds all three and the tool that writes them, so there is nothing to build and
 nothing to download separately.
 
-A pack is made per radio (`rfoundry-mduv380-v26.11-zh.zip` and so on) and names the image it carries. If the name has
+A pack is made per radio (`rfoundry-<radio>-<version>-zh.zip`) and names the image it carries. If the name has
 `-unofficial` in it, it was built from a modified tree and the RadioFoundry project does not support it: ask whoever
 published the pack.
 
@@ -30,7 +30,7 @@ wrong character on every line.
 - **not** the stock firmware file: a pack keeps the codec already in the radio
 
 On Windows the radio's bootloader needs a driver the first time: see
-[Installing](02-installing.md#windows-driver).
+[Installing](02-installing.md#windows-the-bootloader-driver).
 
 ## The order
 
