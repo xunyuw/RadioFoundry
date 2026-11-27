@@ -29,6 +29,7 @@ The flasher is plain ES modules. The logic ports rfoundry, and the tests check t
 | `backup.js`, `zip.js` | Backup bundles | |
 | `restore.js` | What a bundle can put back, and the plans for it | |
 | `select.js` | À la carte feature selection with the dependencies, matching prebuilt variants | |
+| `releaseimage.js` | The site's own release image for a selection that is exactly that release's build, so the common case is a download and no build service (below) | |
 | `update.js` | The Update task's build: which build a radio runs (below) and the build its update installs | |
 | `codeplug.js` | Codeplug formats and the converter registry | |
 | `migrate.js` | The original firmware's channels after an install: a stock codeplug found, converted, written and read back (below) | `tools/codeplug_port.py` |
@@ -796,11 +797,21 @@ with other SPI wiring against f4stub's test profile.
 
 ## Firmware images and custom builds
 
-The flasher gets every image, a prebuilt variant's included, by building it on request (`requestBuild` in `app.js`)
-when the build step continues. The page sends the radio, the newest release tag (`main` before the first
-release) and the feature list, waits for the build, and checks the image against its manifest. Release images on the
-site (`firmware/<radio>/`) are not used by the flasher. The `make` command that builds the same selection, and a picker
-for the image it produces, stay under "Build it yourself".
+The build step takes the site's own copy of a release image when the selection is exactly the build that release
+holds (`releaseImage` in `flasher/releaseimage.js`): the manifest's `features` list (the switches `make print-config`
+prints) compared as a set with the selection's, the start language left out as everywhere a build is matched, and each
+build option the selection names equal to the image's. The site publishes a release's images beside its pages
+(`firmware/<radio>/`, copied from the release's assets), so that path is a download with nothing to build. Everything
+else is built on request (`requestBuild` in `app.js`): the page sends the radio, the newest release tag (`main` before
+the first release) and the feature list, waits for the build, and checks the image against its manifest either way. A
+version link always builds.
+
+The service builds the **upstream** project's tree, whatever site serves the page. On a fork's page, and on a page
+whose tree carries switches the service doesn't have, a feature it doesn't know comes back `unknown feature NAME` and
+the build step says so (`flash.build.mismatch_pack`) rather than "turn it off": the way on is to build the firmware
+locally or, for Chinese, to install a Chinese pack, which carries the image and both blobs ([A Chinese build, from a
+pack](../user/02b-chinese-pack.md)). The `make` command that builds the same selection, and a picker for the image it
+produces, stay under "Build it yourself".
 
 A radio whose image depends on more than the feature switches lists the choices in board.toml `[[build_options]]`
 (`flash.build_options` in `data/radios.json`, such as a band: `BAND=uhf|vhf`). The build step asks for each one

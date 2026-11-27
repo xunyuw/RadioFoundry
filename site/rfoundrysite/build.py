@@ -207,9 +207,12 @@ class Site:
 	def release_list(self):
 		out = []
 		for m, img in self.releases:
+			# build_options: the non-default values this image was built for (a radio's band, its power class), so the
+			# flasher can tell an image it has from one it would have to build (app.js releaseImage)
 			out.append({"board": m["board"], "variant": m.get("variant", "full"), "version": m["version"],
 				    "git": m.get("git"), "git_time": m.get("git_time") or self.commit_time(m.get("git_full")),
 				    "features": m.get("features", ""), "off": m.get("off"),
+				    "build_options": m.get("build_options") or {},
 				    "image": "firmware/%s/%s" % (m["board"], m["image"]["file"]),
 				    "manifest": "firmware/%s/%s" % (m["board"], os.path.basename(img)[:-4] + ".json"),
 				    "size": m["image"]["size"], "sha256": m["image"]["sha256"]})

@@ -186,6 +186,14 @@ rfoundry flash --release latest
 开发者用 `make BOARD=<board>` 构建，并用
 `rfoundry flash build/<board>/rfoundry_<board>.bin --board <board>` 刷写（编解码器选择相同）。把原厂文件放进 `codecs/` 后，构建还会生成 `rfoundry_<board>_codec.bin`，其中带有编解码器：`rfoundry flash build/<board>/rfoundry_<board>_codec.bin` 可在不带 `--board` 的情况下刷写，只有引导程序密钥还需要 `--stock`。见[构建](../dev/building.md)。
 
+### 构建服务没有某个功能时
+
+网页安装器在项目的构建服务上编译镜像，而该服务编译的是项目自己的代码。如果页面来自修改过的代码（别人的分支，或带有项目尚未合并的开关），页面上就可能出现该服务不认识的功能：它会回答“正在构建的固件不认识本页面请求的某个选项或功能”。这不是你的电台出了问题。有三条路：
+
+- 关掉那个功能，构建其余部分；
+- 自己构建固件（见上文）；
+- 中文请改用*中文包*：它把镜像、字库和拼音表放在一起，完全不需要构建：[从中文包安装](02b-chinese-pack.md)。
+
 ## 没有编解码器（“无编解码器：语音关闭”）
 
 屏幕上显示 DMR 呼叫但没有声音：电台没有可用的编解码器。再次运行安装器并给它原厂固件文件，或在终端中执行：

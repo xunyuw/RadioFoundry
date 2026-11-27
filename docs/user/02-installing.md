@@ -310,6 +310,18 @@ Developers build with `make BOARD=<board>` and flash the result with
 build/<board>/rfoundry_<board>_codec.bin` flashes it with no `--board`, and `--stock` is needed only for the
 bootloader key. See [building](../dev/building.md).
 
+### A feature the build service doesn't have
+
+The web installer builds the image on the project's build service, which builds the project's own tree. A page served
+from a modified tree (a fork's, or one with switches the project doesn't have yet) can offer features that service
+doesn't know: it then answers "the firmware version being built does not know an option or feature this page asked
+for". Nothing is wrong with your radio. Three ways on:
+
+- turn that feature off and build the rest;
+- build the firmware yourself (above);
+- for Chinese, a *Chinese pack* carries the image, the glyphs and the pinyin tables together and needs no build at
+  all: [A Chinese build, from a pack](02b-chinese-pack.md).
+
 ## No codec ("No codec: voice off")
 
 DMR calls show on the screen but there's no audio: the radio has no usable codec. Run the installer again and give it

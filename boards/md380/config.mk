@@ -58,8 +58,11 @@ BOARD_NOT_WRITTEN += AUDIO_PROBE	# no board.audio_tap yet
 CONFIG_RX_EXT ?= n
 BOARD_NOT_WRITTEN += RX_EXT	# no receive range in its chip documents (a PLL and an IF chain, no single receiver chip)
 BOARD_NOT_WRITTEN += DSTAR	# no flat FM paths in board.audio_tap (docs/spec/dstar-modem.md 1.1)
-BOARD_NOT_WRITTEN += YSF	# the same flat FM paths Fusion runs on (docs/spec/ysf-modem.md 1.1)
-BOARD_NOT_WRITTEN += YSF_VW	# Voice FR rides on Fusion, not written here either
+# The HR_C5000 gives physical layer receive to no setting tried, and no FM receive copy is documented, so board.baseband
+# is NULL (boards/md380/board.c, hardware-md380.md 4.11): the chip's fit is transmit only, and radio_ysf.c's air_ok()
+# needs both ways
+BOARD_NOT_WRITTEN += YSF	# transmit only: Fusion hears nothing back
+BOARD_NOT_WRITTEN += YSF_VW	# needs YSF, whose over a VW frame rides on
 
 # Chinese needs a 16x16 glyph for every character it draws (core/ui/cjk_font_data.c): the translation face plus a
 # reviewed list of Chinese names and repeater words is about 27 KB, and this 464 KB region is already 99 % full

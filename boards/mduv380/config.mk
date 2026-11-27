@@ -17,8 +17,10 @@ MAXIMAL_VARS := LTO=1
 # (docs/spec/ppp.md), and this one has the adapter; the APRS iGate is off by default (above); French, off by default,
 # so that the maximal build keeps satellite tracking and still fits the app region; Chinese too, whose code point index
 # and pinyin search fill the app region beside every other switch (36 KB over). The `chinese` extra builds it instead,
-# without satellite tracking (board.toml). Only its bitmaps live in the data flash (below), not its index or text
-MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR LANG_ZH LANG_DEFAULT_ZH
+# without satellite tracking (board.toml). Only its bitmaps live in the data flash (below), not its index or text.
+# Voice FR too: its 4,288 B of RAM (below) don't fit beside everything else, and the hotspot is the other switch it
+# trades with, so the `chinese-c4fm` extra builds it on
+MAXIMAL_SKIP := NET_PPP APRS_IGATE LANG_FR LANG_ZH LANG_DEFAULT_ZH YSF_VW
 
 # What the radio's hardware can't do, one switch per line with the reason (tools/boards.py checks there is one;
 # docs/build-config.md, "Unsupported, not written, unconfirmed"): ci's maximal configuration leaves these off
@@ -40,7 +42,14 @@ BOARD_UNSUPPORTED += FAULT_TRACE	# needs a host UART: the host port is USB, and 
 # Chinese on every radio: the `chinese` CI extra builds it, and a radio without the blob burned in draws boxes
 CONFIG_CJK_CELL ?= 12
 BOARD_NOT_WRITTEN += DSTAR	# GMSK, and this board has no flat FM transmit tap (docs/spec/dstar-modem.md 1.1)
-BOARD_NOT_WRITTEN += YSF_VW	# Voice FR needs the flat tap's full-rate voice; not written here either
+# Voice FR is not a flat-tap feature: it is a codec (core/mbe) on the same C4FM route DN takes, which this board runs.
+# It is written here and builds, so it is a choice and not a gap: what it costs is RAM. 4,288 B measured, against 1,900 B
+# this build has left (129,168 of 131,068), so it doesn't fit beside the hotspot. Turn the hotspot off and it does, with
+# 108 B free: that is the CI extra. A platform whose vocoder lends the codec's state block (HAL_VOCODER_LEND_BYTES)
+# spends a few hundred bytes instead (296 B where the vocoder lends); this one lends nothing, so radio_ysf_vw keeps its
+# 3,964 B here (radio_ysf.h RADIO_YSF_VW_IN_AREA)
+BOARD_DEFAULT_OFF += YSF_VW	# works, and needs 4,288 B of RAM: it fits with the hotspot turned off
+CONFIG_YSF_VW ?= n
 
 # Fusion is on by default: this board reaches C4FM through its HR_C6000's FM copy, not the flat FM tap Fusion's first
 # route needs (docs/spec/ysf-modem.md 1.7), so CONFIG_YSF_AIR carries it. Checked both ways on air against a stock radio

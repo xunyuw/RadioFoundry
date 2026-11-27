@@ -168,6 +168,13 @@ endif
 ifeq ($(CONFIG_DMR)$(CONFIG_AIR),yn)
 APP_SRC += core/fec/rx_seen.c
 endif
+# Fusion's chip route (CONFIG_YSF_AIR) runs C4FM through the framer and the soft modem that core/air carries, without
+# the session layer (air_session.c belongs to a P25 or NXDN engine) or core/fec (their codes). On a board with neither
+# flat FM path P25 and NXDN are off, so CONFIG_AIR is off and the glob above left the whole directory out, while
+# radio_ysf.c's CONFIG_YSF_AIR blocks call air_framer_rx and air_framer_locked: the two files it needs come in here
+ifeq ($(CONFIG_AIR)$(CONFIG_YSF_AIR),ny)
+APP_SRC += core/air/air_framer.c core/air/air_softmodem.c
+endif
 # The fast codeplug protocol (core/cps is globbed with CPS_OPENFW): only with its own switch
 ifneq ($(CONFIG_CPS_FAST),y)
 APP_SRC := $(filter-out core/cps/cps_fast.c core/cps/cps_lz4.c,$(APP_SRC))

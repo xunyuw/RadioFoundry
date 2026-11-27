@@ -365,8 +365,8 @@ CONFIG_P25 ?= $(CONFIG_DMR)
 CONFIG_NXDN ?= $(CONFIG_DMR)
 CONFIG_NXDN_SCRAMBLER ?= $(CONFIG_NXDN)
 # Derived, never set by hand (a command line or a board's config.mk that sets one stops the build): AIR the air
-# interface, on with any air-framed mode (P25, NXDN); IMBE the full-rate voice codec and MBE the MBE core, with P25 or
-# Fusion's Voice FR
+# interface's session modes (P25, NXDN); IMBE the full-rate voice codec and MBE the MBE core, with P25 or Fusion's
+# Voice FR
 $(foreach f,AIR IMBE MBE,$(if $(filter-out undefined,$(origin CONFIG_$(f))),$(error CONFIG_$(f) is derived from CONFIG_P25, \
 	CONFIG_NXDN and CONFIG_YSF_VW ($(origin CONFIG_$(f))): set those instead)))
 CONFIG_AIR := $(if $(filter y,$(CONFIG_P25) $(CONFIG_NXDN)),y,n)

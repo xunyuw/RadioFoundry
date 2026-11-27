@@ -54,12 +54,14 @@ values = [
 extra = [
 	{ name = "chinese", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
 	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n", "LTO=1"] },
-	# Chinese and C4FM together: 698,324 B of the 720 KB region and 125,088 B of RAM (measured 24 Nov 2026). The
-	# hotspot goes because its buffers are the RAM this radio has none of: leaving it in put RAM 892 B over. C4FM
-	# here is the HR_C6000's FM copy into the core's soft modem (ysf-modem.md 1.7), not the flat paths
+	# Chinese and C4FM together, Fusion's Voice FR (VW) among it: 702,908 B of the 720 KB region and 129,952 B of RAM
+	# (measured 27 Nov 2026). This is the build that covers YSF_VW, which the maximal configuration leaves out: VW's
+	# 4,288 B of RAM don't fit beside everything it turns on. The hotspot goes because its buffers are the RAM this
+	# radio has none of. C4FM here is the HR_C6000's FM copy into the core's soft modem (ysf-modem.md 1.7), not the
+	# flat paths
 	{ name = "chinese-c4fm", make = ["CONFIG_LANG_ZH=y", "CONFIG_LANG_DEFAULT_ZH=y", "CONFIG_PINYIN=y",
 	  "CONFIG_CJK_FONT_IN_FLASH=y", "CONFIG_PINYIN_IN_FLASH=y", "CONFIG_SATELLITE_TLE=n",
-	  "CONFIG_YSF=y", "CONFIG_YSF_AIR=y", "CONFIG_HOTSPOT=n", "LTO=1"] },
+	  "CONFIG_YSF=y", "CONFIG_YSF_AIR=y", "CONFIG_YSF_VW=y", "CONFIG_HOTSPOT=n", "LTO=1"] },
 ]
 
 [flash]

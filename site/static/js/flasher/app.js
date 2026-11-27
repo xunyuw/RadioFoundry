@@ -35,6 +35,7 @@ import { targets, planInternal, planStock, codeplugSectors, writeCodeplug, codep
 import { Selection } from "./select.js";
 import { codecPresent, decideCodec, DecisionError } from "./decide.js";
 import { tooBig } from "./buildfit.js";
+import { releaseImage } from "./releaseimage.js";
 import { suggestPack, packCode, startCode, startLanguages, startLanguage, setStartLanguage } from "./langsuggest.js";
 import { readBootKey } from "./bootkey.js";
 import { codecSegments, loadCodec, readCodec, saveCodec } from "./codecsave.js";
@@ -1314,13 +1315,16 @@ function buildView() {
 		const missing = buildOptions().find((o) => !S.buildOptions?.[o.name]);
 		forward(button(busy ? [spinner(), t("flash.nav.building")] : t(missing ? "flash.nav.choose" : S.firmware || S.sim ? `flash.nav.to_${stepsFor()[S.step + 1]}`
 			: VERSION_REF ? "flash.nav.build_version" : "flash.nav.build", { what: missing?.title.toLowerCase(), ref: VERSION_REF && versionShort() }), go, { primary: true, disabled: busy || !!missing }), summary);
-		// every image, prebuilt choice or not, comes from the build service (or is the user's own)
+		// an image is the site's own when the selection is exactly a release's build (releaseImage), else the build
+		// service's, or the user's own
 		// the image's state, then building it yourself: one line and a fold under the features, not a card of its own
+		const owned = releaseImage(sel, { releases: S.data.releases, board: S.radio.id, options: S.buildOptions, pinned: !!VERSION_REF });
 		const image = h("div", { class: "build-image" },
 			S.firmware ? notice(t("flash.build.image_ready", { what: S.firmware.source }), "ok")
 				: building && S.build.error ? buildErrorNotice(S.build.error)
 				: building ? h("p", { class: "muted", role: "status" }, spinner(), S.build.text)
-				: h("p", { class: "small muted" }, t(S.sim ? "flash.sim.image" : VERSION_REF ? "flash.build.version_on_request" : "flash.build.on_request", { ref: versionShort() })),
+				: h("p", { class: "small muted" }, t(S.sim ? "flash.sim.image" : owned ? "flash.build.from_release"
+					: VERSION_REF ? "flash.build.version_on_request" : "flash.build.on_request", { ref: versionShort(), version: owned?.version })),
 			h("details", { class: "small" }, h("summary", {}, t("flash.build.self_title")),
 				h("p", {}, t("flash.build.self_text")), h("pre", {}, h("code", {}, sel.makeCommand(S.buildOptions))),
 				filePicker(t("flash.build.own_image"), ".bin", (f) => loadOwnImage(f, draw)),
@@ -1424,9 +1428,22 @@ const selectionKey = (sel) => `${VERSION_REF || ""}:${sel.radio.id}:${JSON.strin
 async function requestBuild(redraw) {
 	const sel = S.selection, key = selectionKey(sel);
 	const current = () => S.build?.selection === key && selectionKey(S.selection) === key;
-	S.build = { selection: key, text: t("flash.build.sending") };
+	// The site's own release image for this exact selection: fetched and checked like the service's, nothing built
+	const owned = releaseImage(sel, { releases: S.data.releases, board: S.radio.id, options: S.buildOptions, pinned: !!VERSION_REF });
+	S.build = { selection: key, text: t(owned ? "flash.build.fetching" : "flash.build.sending") };
 	redraw();
 	try {
+		if (owned) {
+			const [m, img] = await Promise.all([fetch(ROOT + owned.manifest).then((r) => r.json()),
+				fetch(ROOT + owned.image).then((r) => r.arrayBuffer()).then((x) => new Uint8Array(x))]);
+			await verify(m, img, fb(), S.board.id);
+			if (!current()) return;
+			S.firmware = { manifest: m, image: img, source: t("flash.build.release_image", { version: m.version }), origin: "release",
+				variant: sel.matches(startCode) || "custom", selection: key };
+			S.build = null;
+			redraw();
+			return;
+		}
 		const rels = S.data.releases.filter((x) => x.board === S.radio.id);
 		if (VERSION_REF && !validRef(VERSION_REF)) throw new Error(t("flash.version.bad", { ref: VERSION_REF }));
 		const id = useId();
@@ -1457,8 +1474,11 @@ async function requestBuild(redraw) {
 			variant: sel.matches(startCode) || "custom", build: b.id, selection: key, pinned: !!VERSION_REF };
 		S.build = null;
 	} catch (e) {
+		// A build service from another tree (a fork's page against the project's service) doesn't know the switches this
+		// tree added, and "turn that feature off" is the wrong advice when the feature is why the user is here: a Chinese
+		// image is what the Chinese pack is for, and its page says how to install one.
 		if (S.build?.selection === key) S.build.error = e instanceof FitError ? { text: fitText(e.fit), fit: e.fit }
-			: { text: t("flash.build.unavailable", { error: errorText(e) }), rec: diag.currentError() };
+			: { text: /^unknown (feature|option)/i.test(e?.message || "") ? t("flash.build.mismatch_pack") : t("flash.build.unavailable", { error: errorText(e) }), rec: diag.currentError() };
 	}
 	redraw();
 }
